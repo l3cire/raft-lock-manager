@@ -9,12 +9,17 @@ void send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
 	printf("RPC:: failed to send packet");
 	exit(1);
     }
-    rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&packet->rc, sizeof(packet->rc));
-    printf("Read the response with size: %i and result %i\n", rc, packet->rc);
-    if(rc < 0 || packet->rc < 0) {
-	printf("RPC:: server returned an error");
+
+    response_info_t response;
+    bzero(&response, RESPONSE_SIZE);
+    rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
+    printf("read the response with size %i and response code %i\n", rc, response.rc);
+    printf("lock server: %s\n", response.message);
+    if(rc < 0 || response.rc < 0) {
+	printf("rpc:: server returned an error\n");
 	exit(1);
     }
+    packet->rc = response.rc;
 }
 
 void RPC_init(rpc_conn_t *rpc, int src_port, int dst_port, char dst_addr[]) {

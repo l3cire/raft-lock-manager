@@ -28,17 +28,20 @@ int main(int argc, char *argv[]) {
     }
 }
 
-void send_packet_response(struct sockaddr_in *addr, int response_code) {
-    UDP_Write(sd, addr, (char*)&response_code, sizeof(response_code));
+void send_packet_response(struct sockaddr_in *addr, response_info_t *response) {
+    UDP_Write(sd, addr, (char*)response, RESPONSE_SIZE);
 }
 
 void* handle_packet(void *arg) {
     packet_info_t *packet = &((request_t*)arg)->packet;
     struct sockaddr_in *addr = &((request_t*)arg)->addr;
 
+    response_info_t response;
+    bzero(&response, RESPONSE_SIZE);
+    strcpy(response.message, "response message");
     switch (packet->operation) {
 	case CLIENT_INIT:
-	    send_packet_response(addr, 0);
+	    send_packet_response(addr, &response);
 	    break;
 	case LOCK_ACQUIRE:
 	    break;
@@ -47,7 +50,7 @@ void* handle_packet(void *arg) {
 	case APPEND_FILE:
 	    break;
 	case CLIENT_CLOSE:
-	    send_packet_response(addr, 0);
+	    send_packet_response(addr, &response);
 	    break;
     }
     pthread_exit(0);

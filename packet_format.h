@@ -11,6 +11,13 @@ typedef struct packet_info{
 	char buffer[BUFFER_SIZE]; //data appending to the file
 } packet_info_t;
 
+typedef struct response_info {
+	int client_id;
+	int rc;
+	int operation;
+	char message[256];
+} response_info_t;
+
 typedef enum operation_type{
 	CLIENT_INIT,
 	LOCK_ACQUIRE,
@@ -20,5 +27,6 @@ typedef enum operation_type{
 } operation_type_t;
 
 #define PACKET_SIZE sizeof(packet_info_t)
+#define RESPONSE_SIZE sizeof(response_info_t)
 
 #endif
