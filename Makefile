@@ -1,20 +1,35 @@
 CC     := gcc
 CFLAGS := -Wall -Werror 
 
-SRCS   := client.c \
-	lock_server.c 
 
-OBJS   := ${SRCS:c=o}
-PROGS  := ${SRCS:.c=}
+SRCS_COMMON			:= udp.c
+SRCS_CLIENT			:= ${SRCS_COMMON} rpc.c client.c
+SRCS_LOCK_SERVER	:= ${SRCS_COMMON} lock_server.c
+
+BUILD_DIR			:= ./build
+BIN_DIR				:= ./bin
+
+OBJ_CLIENT			:= $(addprefix $(BUILD_DIR)/, $(notdir $(SRCS_CLIENT:.c=.o)))
+OBJ_LOCK_SERVER		:= $(addprefix $(BUILD_DIR)/, $(notdir $(SRCS_LOCK_SERVER:.c=.o)))
 
 .PHONY: all
-all: ${PROGS}
+all: client lock_server
 
-${PROGS} : % : %.o Makefile
-	${CC} $< -o $@ udp.c
+client: $(OBJ_CLIENT)
+	$(CC) $(CFLAGS) $^ -o $(BIN_DIR)/$@
+
+run_client: client
+	$(BIN_DIR)/$<
+
+lock_server: $(OBJ_LOCK_SERVER)
+	$(CC) $(CFLAGS) $^ -o $(BIN_DIR)/$@
+
+run_lock_server: lock_server
+	$(BIN_DIR)/$<
+
+$(BUILD_DIR)/%.o : %.c 
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f ${PROGS} ${OBJS}
+	rm -f ${OBJ_CLIENT} ${OBJ_LOCK_SERVER} $(BIN_DIR)/client $(BIN_DIR)/lock_server
 
-%.o: %.c Makefile
-	${CC} ${CFLAGS} -c $<

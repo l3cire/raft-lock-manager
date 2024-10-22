@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include "rpc.c"
 #include "rpc.h"
 
 int main(int argc, char *argv[]) {

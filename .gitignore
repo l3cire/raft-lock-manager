@@ -1,3 +1,6 @@
+bin/
+build/
+
 *.o
 *.obj
 *.lib
@@ -5,4 +8,5 @@
 *.dll
 *.so
 
+.DS_Store
 
