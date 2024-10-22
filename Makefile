@@ -4,7 +4,7 @@ CFLAGS := -Wall -Werror
 
 SRCS_COMMON			:= udp.c
 SRCS_CLIENT			:= ${SRCS_COMMON} rpc.c client.c
-SRCS_LOCK_SERVER	:= ${SRCS_COMMON} lock_server.c
+SRCS_LOCK_SERVER	:= ${SRCS_COMMON} lock_server.c spinlock.c
 
 BUILD_DIR			:= ./build
 BIN_DIR				:= ./bin

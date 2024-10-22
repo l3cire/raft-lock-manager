@@ -13,7 +13,6 @@ void send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
     response_info_t response;
     bzero(&response, RESPONSE_SIZE);
     rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
-    printf("read the response with size %i and response code %i\n", rc, response.rc);
     printf("lock server: %s\n", response.message);
     if(rc < 0 || response.rc < 0) {
 	printf("rpc:: server returned an error\n");

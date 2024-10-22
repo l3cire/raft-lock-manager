@@ -4,8 +4,11 @@
 int main(int argc, char *argv[]) {
     rpc_conn_t rpc;
     RPC_init(&rpc, 20000, 10000, "localhost");
-    printf("RPC initialization successfull\n");
+    printf("rpc initialization successfull\n");
     
+    RPC_acquire_lock(&rpc);
+    RPC_release_lock(&rpc);
+
     RPC_close(&rpc);
-    printf("Closed RPC\n");
+    printf("closed rpc\n");
 }
