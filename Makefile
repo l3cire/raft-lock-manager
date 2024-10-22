@@ -8,6 +8,7 @@ SRCS_LOCK_SERVER	:= ${SRCS_COMMON} lock_server.c spinlock.c
 
 BUILD_DIR			:= ./build
 BIN_DIR				:= ./bin
+FILES_DIR			:= ./server_files
 
 OBJ_CLIENT			:= $(addprefix $(BUILD_DIR)/, $(notdir $(SRCS_CLIENT:.c=.o)))
 OBJ_LOCK_SERVER		:= $(addprefix $(BUILD_DIR)/, $(notdir $(SRCS_LOCK_SERVER:.c=.o)))
@@ -32,4 +33,5 @@ $(BUILD_DIR)/%.o : %.c
 
 clean:
 	rm -f ${OBJ_CLIENT} ${OBJ_LOCK_SERVER} $(BIN_DIR)/client $(BIN_DIR)/lock_server
+	find $(FILES_DIR) -type f -exec cp /dev/null {} \;
 

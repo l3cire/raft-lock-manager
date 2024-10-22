@@ -7,6 +7,7 @@ int main(int argc, char *argv[]) {
     printf("rpc initialization successfull\n");
     
     RPC_acquire_lock(&rpc);
+    RPC_append_file(&rpc, "file_1", "hello world");
     RPC_release_lock(&rpc);
 
     RPC_close(&rpc);

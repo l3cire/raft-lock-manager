@@ -1,5 +1,6 @@
 bin/
 build/
+server_files/
 
 *.o
 *.obj

@@ -63,8 +63,18 @@ int handle_lock_release(response_info_t *response, packet_info_t *packet) {
 }
 
 int handle_append_file(response_info_t *response, packet_info_t *packet) {
-    response->rc = -1;
-    strcpy(response->message, "not implemented");
+    char filename[25] = "./server_files/";
+    strcat(filename, packet->file_name);
+    FILE *f = fopen(filename, "a");
+    if(!f) {
+	response->rc = -1;
+	strcpy(response->message, "file cannot be opened");
+	return 0;
+    }
+    fprintf(f, "%s", packet->buffer);
+    fclose(f);
+    response->rc = 0;
+    strcpy(response->message, "success");
     return 0;
 }
 
