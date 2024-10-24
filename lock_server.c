@@ -24,10 +24,11 @@ int main(int argc, char *argv[]) {
     pthread_t req_thread_id;
 
     while(1) {
-	request_t request;
-	int rc = UDP_Read(sd, &request.addr, (char*)&request.packet, PACKET_SIZE);
+	request_t *request = malloc(sizeof(request_t));
+	bzero(request, sizeof(request_t));
+	int rc = UDP_Read(sd, &request->addr, (char*)&request->packet, PACKET_SIZE);
 	if(rc < 0) continue;
-	pthread_create(&req_thread_id, NULL, handle_packet, &request);
+	pthread_create(&req_thread_id, NULL, handle_packet, request);
 	pthread_detach(req_thread_id);
     }
 }
@@ -104,6 +105,7 @@ void* handle_packet(void *arg) {
 	    break;
     }
     send_packet_response(addr, &response);
+    free(arg);
     pthread_exit(0);
 }
 
