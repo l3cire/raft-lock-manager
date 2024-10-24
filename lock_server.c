@@ -13,6 +13,29 @@ typedef struct request {
     struct sockaddr_in addr;
 } request_t;
 
+#define MAX_ID 1000
+char* ids;
+spinlock_t ids_lock;
+
+int assign_id() {
+    spinlock_acquire(&ids_lock);
+    for(int i = 0; i < MAX_ID; ++i) {
+	if(ids[i] == 0) {
+	    ids[i] = 1;
+	    spinlock_release(&ids_lock);
+	    return i;
+	}
+    }
+    spinlock_release(&ids_lock);
+    return -1;
+}
+
+void release_id(int id) {
+    spinlock_acquire(&ids_lock);
+    ids[id] = 0;
+    spinlock_release(&ids_lock);
+}
+
 void* handle_packet(void *arg);
 
 int main(int argc, char *argv[]) {
@@ -20,6 +43,10 @@ int main(int argc, char *argv[]) {
     assert(sd >= 0);
 
     spinlock_init(&lock);
+
+    spinlock_init(&ids_lock);
+    ids = malloc(MAX_ID);
+    bzero(ids, MAX_ID);
 
     pthread_t req_thread_id;
 
@@ -38,12 +65,19 @@ int send_packet_response(struct sockaddr_in *addr, response_info_t *response) {
 }
 
 int handle_client_init(response_info_t *response, packet_info_t *packet) {
+    response->client_id = assign_id();
+    if(response->client_id == -1) {
+	response->rc = -1;
+	strcpy(response->message, "too many clients");
+	return 0;
+    }
     response->rc = 0;
     strcpy(response->message, "connected");
     return 0;
 }
 
 int handle_client_close(response_info_t *response, packet_info_t *packet) {
+    release_id(response->client_id);
     response->rc = 0;
     strcpy(response->message, "disconnected");
     return 0;
