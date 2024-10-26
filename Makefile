@@ -4,8 +4,8 @@ CFLAGS := -Wall -Werror
 TEST_DIR			:= ./tests
 
 SRCS_COMMON			:= udp.c
-SRCS_CLIENT			:= rpc.c
-SRCS_LOCK_SERVER	:= spinlock.c
+SRCS_CLIENT			:= client_rpc.c
+SRCS_LOCK_SERVER		:= spinlock.c server_rpc.c
 SRCS_TESTS			:= test_lock.c
 
 BUILD_DIR			:= ./build
@@ -26,22 +26,22 @@ endif
 
 
 .PHONY: all
-all: client lock_server
+all: client server
 
 client: $(OBJ_COMMON) $(OBJ_CLIENT) $(BUILD_DIR)/client.o
 	$(CC) $(CFLAGS) $^ -o $(BIN_DIR)/$@
 
-lock_server: $(OBJ_COMMON) $(OBJ_LOCK_SERVER) $(BUILD_DIR)/lock_server.o
+server: $(OBJ_COMMON) $(OBJ_LOCK_SERVER) $(BUILD_DIR)/server.o
 	$(CC) $(CFLAGS) $^ -o $(BIN_DIR)/$@
 
-test_%: $(BUILD_DIR)/test_%.o lock_server client clean_files 
+test_%: $(BUILD_DIR)/test_%.o server client clean_files 
 	$(CC) $(CFLAGS) $< $(OBJ_COMMON) $(OBJ_CLIENT) $(OBJ_LOCK_SERVER) -o $(BIN_DIR)/$@
 
 run_%: %
 	$(BIN_DIR)/$< $(RUN_ARGS) 
 
 
-$(OBJ_CLIENT) $(OBJ_LOCK_SERVER) $(OBJ_COMMON) $(BUILD_DIR)/client.o $(BUILD_DIR)/lock_server.o: $(BUILD_DIR)/%.o : %.c 
+$(OBJ_CLIENT) $(OBJ_LOCK_SERVER) $(OBJ_COMMON) $(BUILD_DIR)/client.o $(BUILD_DIR)/server.o: $(BUILD_DIR)/%.o : %.c 
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJ_TEST): $(BUILD_DIR)/%.o : $(TEST_DIR)/%.c

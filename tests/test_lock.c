@@ -3,7 +3,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
-#include "../rpc.h"
+#include "../client_rpc.h"
 
 /*
 Test lock behavior.
@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
     // fork server process
     int server_pid = fork();
     if(server_pid == 0) {
-	int rs = execv("./bin/lock_server", 0);
+	int rs = execv("./bin/server", 0);
 	printf("exec failed, result: %i\n", rs);
 	exit(1);
     }

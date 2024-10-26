@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "rpc.h"
+#include "client_rpc.h"
 
 int main(int argc, char *argv[]) {
     rpc_conn_t rpc;
