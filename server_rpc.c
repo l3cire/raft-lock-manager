@@ -69,6 +69,7 @@ void* handle_packet(void *arg) {
     bzero(&response, RESPONSE_SIZE);
     response.operation = packet->operation;
     response.client_id = packet->client_id;
+    response.vtime = packet->vtime;
     
     // get the client data structure -- if it does not exist and the request is init, create a new structure;
     spinlock_acquire(&client_table_lock);
@@ -95,7 +96,7 @@ void* handle_packet(void *arg) {
     if(client->vtime == packet->vtime) {
 	if(client->state == PROCESSING) { 
 	    // if the request from the client is already processed on another thread, return the corresponding message
-	    response.rc = -1;
+	    response.rc = -12;
 	    sprintf(response.message, "request from this client is already in progress");
 	    send_packet_response(rpc, addr, &response);
 	} else {

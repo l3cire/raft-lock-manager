@@ -14,6 +14,7 @@ typedef struct packet_info{
 typedef struct response_info {
 	int client_id;
 	int rc;
+	int vtime;
 	int operation;
 	char message[256];
 } response_info_t;

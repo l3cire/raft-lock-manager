@@ -13,7 +13,7 @@ typedef struct rpc_conn {
 	atomic_int vtime;
 } rpc_conn_t;
 
-#define RPC_READ_TIEMOUT 1000
+#define RPC_READ_TIEMOUT 100
 
 
 //This function should set up a socket and bind it to src_port
