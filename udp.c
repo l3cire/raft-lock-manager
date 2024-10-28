@@ -48,6 +48,17 @@ int UDP_FillSockAddr(struct sockaddr_in *addr, char *hostname, int port) {
     return 0;
 }
 
+int UDP_SetReceiveTimeout(int fd, int timeout) {
+    struct timeval tv;
+    tv.tv_sec = timeout / 1000;
+    tv.tv_usec = (timeout % 1000) * 1000;
+    if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+	perror("error setting timeout");
+	return -1;
+    }
+    return 0;
+}
+
 int UDP_Write(int fd, struct sockaddr_in *addr, char *buffer, int n) {
     int addr_len = sizeof(struct sockaddr_in);
     int rc = sendto(fd, buffer, n, 0, (struct sockaddr *) addr, addr_len);

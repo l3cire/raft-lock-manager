@@ -5,7 +5,7 @@
 
 typedef struct packet_info{
 	int client_id; //unique number for each client
-	int rc; //0 is SUCCESS, 1 is FAILURE
+	int vtime;
 	int operation; //RPC operation
 	char file_name[256]; //file name
 	char buffer[BUFFER_SIZE]; //data appending to the file

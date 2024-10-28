@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
 
     // initialize RPCs for each client
     rpc_conn_t rpc;
-    RPC_init(&rpc, 20000 + client_id, 10000, "localhost");
+    RPC_init(&rpc, client_id, 20000 + client_id, 10000, "localhost");
     
     char* msg = malloc(BUFFER_SIZE); 
     sprintf(msg, "hello from client %i\n", client_id);

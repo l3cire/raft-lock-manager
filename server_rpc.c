@@ -11,35 +11,15 @@ typedef struct request {
 } request_t;
 
 #define MAX_ID 1000
-char* ids;
-spinlock_t ids_lock;
-
-int assign_id() {
-    spinlock_acquire(&ids_lock);
-    for(int i = 0; i < MAX_ID; ++i) {
-	if(ids[i] == 0) {
-	    ids[i] = 1;
-	    spinlock_release(&ids_lock);
-	    return i;
-	}
-    }
-    spinlock_release(&ids_lock);
-    return -1;
-}
-
-void release_id(int id) {
-    spinlock_acquire(&ids_lock);
-    ids[id] = 0;
-    spinlock_release(&ids_lock);
-}
+client_process_data_t* client_table[MAX_ID];
+spinlock_t client_table_lock;
 
 
 void Server_RPC_init(server_rpc_conn_t *rpc, int port) {
     rpc->sd = UDP_Open(port);
     
-    spinlock_init(&ids_lock);
-    ids = malloc(MAX_ID);
-    bzero(ids, MAX_ID);
+    spinlock_init(&client_table_lock);
+    bzero(client_table, sizeof(client_table));
 }
 
 void* handle_packet(void *arg);
@@ -64,7 +44,6 @@ int send_packet_response(server_rpc_conn_t *rpc, struct sockaddr_in *addr, respo
 }
 
 int handle_client_init(response_info_t *response, packet_info_t *packet) {
-    response->client_id = assign_id();
     if(response->client_id == -1) {
 	response->rc = -1;
 	strcpy(response->message, "too many clients");
@@ -76,7 +55,6 @@ int handle_client_init(response_info_t *response, packet_info_t *packet) {
 }
 
 int handle_client_close(response_info_t *response, packet_info_t *packet) {
-    release_id(response->client_id);
     response->rc = 0;
     strcpy(response->message, "disconnected");
     return 0;
@@ -91,6 +69,47 @@ void* handle_packet(void *arg) {
     bzero(&response, RESPONSE_SIZE);
     response.operation = packet->operation;
     response.client_id = packet->client_id;
+    
+    // get the client data structure -- if it does not exist and the request is init, create a new structure;
+    spinlock_acquire(&client_table_lock);
+    if(client_table[packet->client_id] == 0) {
+	// if client not initialized and the operation is not init, return an error
+	if(packet->operation != CLIENT_INIT) {
+	    spinlock_release(&client_table_lock);
+	    response.rc = -1;
+	    sprintf(response.message, "client not initialized");
+	    send_packet_response(rpc, addr, &response);
+	    free(arg);
+	    pthread_exit(0);
+	}
+	client_table[packet->client_id] = malloc(sizeof(client_process_data_t));
+	client_table[packet->client_id]->id = packet->client_id;
+	client_table[packet->client_id]->vtime = -1;
+	spinlock_init(&client_table[packet->client_id]->lock);
+    } 
+    client_process_data_t* client = client_table[packet->client_id];
+    spinlock_release(&client_table_lock); // at this point, got a client structure pointer and don't need a whole table lock anymore
+    
+
+    spinlock_acquire(&client->lock); // lock the client state to do all the necessary checks
+    if(client->vtime == packet->vtime) {
+	if(client->state == PROCESSING) { 
+	    // if the request from the client is already processed on another thread, return the corresponding message
+	    response.rc = -1;
+	    sprintf(response.message, "request from this client is already in progress");
+	    send_packet_response(rpc, addr, &response);
+	} else {
+	    // if already sent the response for this request before, repeat this response
+	    send_packet_response(rpc, addr, &client->last_response);
+	}
+	spinlock_release(&client->lock);
+	free(arg);
+	pthread_exit(0);
+    } 
+    client->state = PROCESSING;
+    client->vtime = packet->vtime;
+    spinlock_release(&client->lock);
+
     switch (packet->operation) {
 	case CLIENT_INIT:
 	    handle_client_init(&response, packet);
@@ -108,7 +127,13 @@ void* handle_packet(void *arg) {
 	    handle_client_close(&response, packet);
 	    break;
     }
+
+    spinlock_acquire(&client->lock);
+    client->state = WAITING;
+    client->last_response = response;
     send_packet_response(rpc, addr, &response);
+    spinlock_release(&client->lock);
+
     free(arg);
     pthread_exit(0);
 }
