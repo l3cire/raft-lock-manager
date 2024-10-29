@@ -4,7 +4,7 @@
 #include <errno.h>
 #include <stdio.h>
 
-void send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
+int send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
     packet->vtime = rpc->vtime ++;
     packet->client_id = rpc->client_id;
     int rc = UDP_Write(rpc->sd, &rpc->send_addr, (char*)packet, PACKET_SIZE);
@@ -23,10 +23,7 @@ void send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
 	}
 	rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
     }
-    if(rc < 0 || response.rc < 0) {
-	printf("rpc:: server returned an error: %s\n", response.message);
-	exit(1);
-    }
+    return response.rc;
 }
 
 void RPC_init(rpc_conn_t *rpc, int id, int src_port, int dst_port, char dst_addr[]) {
@@ -40,7 +37,10 @@ void RPC_init(rpc_conn_t *rpc, int id, int src_port, int dst_port, char dst_addr
     bzero(&packet, PACKET_SIZE);
     packet.operation = CLIENT_INIT;
 
-    send_packet(rpc, &packet); 
+    if(send_packet(rpc, &packet) < 0) {
+	printf("rpc error\n");
+	exit(1);
+    } 
 }
 
 void RPC_acquire_lock(rpc_conn_t *rpc) {
@@ -48,7 +48,10 @@ void RPC_acquire_lock(rpc_conn_t *rpc) {
     bzero(&packet, PACKET_SIZE);
     packet.operation = LOCK_ACQUIRE;
    
-    send_packet(rpc, &packet); 
+    if(send_packet(rpc, &packet) < 0) {
+	printf("rpc error\n");
+	exit(1);
+    } 
 }
 
 void RPC_release_lock(rpc_conn_t *rpc){
@@ -56,7 +59,11 @@ void RPC_release_lock(rpc_conn_t *rpc){
     bzero(&packet, PACKET_SIZE);
     packet.operation = LOCK_RELEASE;
 
-    send_packet(rpc, &packet);
+    int rc = send_packet(rpc, &packet);
+    if(rc < 0 && rc != E_LOCK_EXP) {
+	printf("rpc error\n");
+	exit(1);
+    }
 }
 
 void RPC_append_file(rpc_conn_t *rpc, char *file_name, char *buffer) {
@@ -66,7 +73,9 @@ void RPC_append_file(rpc_conn_t *rpc, char *file_name, char *buffer) {
     strcpy(packet.file_name, file_name);
     memcpy(packet.buffer, buffer, BUFFER_SIZE);
 
-    send_packet(rpc, &packet);
+    while(send_packet(rpc, &packet) == E_LOCK_EXP) {
+	RPC_acquire_lock(rpc);
+    }
 } 
 
 void RPC_close(rpc_conn_t *rpc){
