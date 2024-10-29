@@ -17,7 +17,7 @@ void send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
     bzero(&response, RESPONSE_SIZE);
     rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
     //printf("lock server: %s\n", response.message);
-    while((rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN)) || (rc > 0 && response.rc == -12) || (rc > 0 && response.vtime < packet->vtime)) {
+    while((rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN)) || (rc > 0 && response.rc == E_IN_PROGRESS) || (rc > 0 && response.vtime < packet->vtime)) {
 	if(rc < 0) {
 	    rc = UDP_Write(rpc->sd, &rpc->send_addr, (char*)packet, PACKET_SIZE);
 	}

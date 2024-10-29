@@ -10,16 +10,12 @@ typedef struct request {
     struct sockaddr_in addr;
 } request_t;
 
-#define MAX_ID 1000
-client_process_data_t* client_table[MAX_ID];
-spinlock_t client_table_lock;
-
 
 void Server_RPC_init(server_rpc_conn_t *rpc, int port) {
     rpc->sd = UDP_Open(port);
     
-    spinlock_init(&client_table_lock);
-    bzero(client_table, sizeof(client_table));
+    spinlock_init(&rpc->client_table_lock);
+    bzero(rpc->client_table, sizeof(rpc->client_table));
 }
 
 void* handle_packet(void *arg);
@@ -67,36 +63,35 @@ void* handle_packet(void *arg) {
 
     response_info_t response;
     bzero(&response, RESPONSE_SIZE);
-    response.operation = packet->operation;
     response.client_id = packet->client_id;
     response.vtime = packet->vtime;
     
     // get the client data structure -- if it does not exist and the request is init, create a new structure;
-    spinlock_acquire(&client_table_lock);
-    if(client_table[packet->client_id] == 0) {
+    spinlock_acquire(&rpc->client_table_lock);
+    if(rpc->client_table[packet->client_id] == 0) {
 	// if client not initialized and the operation is not init, return an error
 	if(packet->operation != CLIENT_INIT) {
-	    spinlock_release(&client_table_lock);
-	    response.rc = -1;
+	    spinlock_release(&rpc->client_table_lock);
+	    response.rc = E_NO_CLIENT;
 	    sprintf(response.message, "client not initialized");
 	    send_packet_response(rpc, addr, &response);
 	    free(arg);
 	    pthread_exit(0);
 	}
-	client_table[packet->client_id] = malloc(sizeof(client_process_data_t));
-	client_table[packet->client_id]->id = packet->client_id;
-	client_table[packet->client_id]->vtime = -1;
-	spinlock_init(&client_table[packet->client_id]->lock);
+	rpc->client_table[packet->client_id] = malloc(sizeof(client_process_data_t));
+	rpc->client_table[packet->client_id]->id = packet->client_id;
+	rpc->client_table[packet->client_id]->vtime = -1;
+	spinlock_init(&rpc->client_table[packet->client_id]->lock);
     } 
-    client_process_data_t* client = client_table[packet->client_id];
-    spinlock_release(&client_table_lock); // at this point, got a client structure pointer and don't need a whole table lock anymore
+    client_process_data_t* client = rpc->client_table[packet->client_id];
+    spinlock_release(&rpc->client_table_lock); // at this point, got a client structure pointer and don't need a whole table lock anymore
     
 
     spinlock_acquire(&client->lock); // lock the client state to do all the necessary checks
     if(client->vtime == packet->vtime) {
 	if(client->state == PROCESSING) { 
 	    // if the request from the client is already processed on another thread, return the corresponding message
-	    response.rc = -12;
+	    response.rc = E_IN_PROGRESS;
 	    sprintf(response.message, "request from this client is already in progress");
 	    send_packet_response(rpc, addr, &response);
 	} else {
