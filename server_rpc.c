@@ -39,23 +39,6 @@ int send_packet_response(server_rpc_conn_t *rpc, struct sockaddr_in *addr, respo
     return UDP_Write(rpc->sd, addr, (char*)response, RESPONSE_SIZE);
 }
 
-int handle_client_init(response_info_t *response, packet_info_t *packet) {
-    if(response->client_id == -1) {
-	response->rc = -1;
-	strcpy(response->message, "too many clients");
-	return 0;
-    }
-    response->rc = 0;
-    strcpy(response->message, "connected");
-    return 0;
-}
-
-int handle_client_close(response_info_t *response, packet_info_t *packet) {
-    response->rc = 0;
-    strcpy(response->message, "disconnected");
-    return 0;
-}
-
 void* handle_packet(void *arg) {
     packet_info_t *packet = &((request_t*)arg)->packet;
     struct sockaddr_in *addr = &((request_t*)arg)->addr;
@@ -108,7 +91,7 @@ void* handle_packet(void *arg) {
 
     switch (packet->operation) {
 	case CLIENT_INIT:
-	    handle_client_init(&response, packet);
+	    strcpy(response.message, "connected"); // TODO: check user didn't exist before
 	    break;
 	case LOCK_ACQUIRE:
 	    response.rc = rpc->handle_lock_acquire(packet->client_id, response.message);
@@ -120,7 +103,7 @@ void* handle_packet(void *arg) {
 	    response.rc = rpc->handle_append_file(packet->client_id, packet->file_name, packet->buffer, response.message);
 	    break;
 	case CLIENT_CLOSE:
-	    handle_client_close(&response, packet);
+	    strcpy(response.message, "disconnected"); // TODO: clear user's data
 	    break;
     }
 

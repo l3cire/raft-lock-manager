@@ -4,9 +4,11 @@
 #include <string.h>
 #include "server_rpc.h"
 #include "spinlock.h"
+#include "time.h"
 
 spinlock_t lock;
 atomic_int lock_holder;
+atomic_int last_active_time;
 
 int handle_lock_acquire(int client_id, char* message) {
     if(lock_holder == client_id) {
@@ -62,6 +64,7 @@ int main(int argc, char *argv[]) {
     // initialize the spinlock
     spinlock_init(&lock);
     lock_holder = -1;
+    last_active_time = 1000*clock()/CLOCKS_PER_SEC;    
 
     // start listening for requests
     Server_RPC_listen(&rpc);
