@@ -77,7 +77,7 @@ int handle_append_file(int client_id, char* filename, char* buffer, char* messag
     return 0;
 }
 
-void handle_timer() {
+void handle_timer(void* arg) {
     assert(lock_holder != -1);
     printf("timer triggered");
     lock_holder = -1;
@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
     // initialize the spinlock
     spinlock_init(&lock);
     lock_holder = -1;
-    timer_init(&timer, CLIENT_TIMEOUT, handle_timer);
+    timer_init(&timer, CLIENT_TIMEOUT, handle_timer, NULL);
 
     // start listening for requests
     Server_RPC_listen(&rpc);

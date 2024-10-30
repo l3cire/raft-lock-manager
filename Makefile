@@ -5,8 +5,8 @@ TEST_DIR			:= ./tests
 
 SRCS_COMMON			:= udp.c
 SRCS_CLIENT			:= client_rpc.c
-SRCS_LOCK_SERVER		:= spinlock.c server_rpc.c timer.c
-SRCS_TESTS			:= test_lock.c test_long_requests.c test_timer.c
+SRCS_LOCK_SERVER		:= spinlock.c server_rpc.c timer.c tmdspinlock.c
+SRCS_TESTS			:= test_lock.c test_long_requests.c test_timer.c test_tmdspinlock.c
 
 BUILD_DIR			:= ./build
 BIN_DIR				:= ./bin

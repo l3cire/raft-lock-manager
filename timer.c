@@ -13,7 +13,7 @@ void* timer_thread(void* arg) {
 	    int time_diff_msec = time_diff * 1000 / CLOCKS_PER_SEC;
 	    if(time_diff_msec >= timer->duration) {
 		timer->state = 0;
-		timer->handle_timer();
+		timer->handle_timer(timer->handler_arg);
 	    }
 	} 
 	spinlock_release(&timer->lock);
@@ -22,11 +22,12 @@ void* timer_thread(void* arg) {
     pthread_exit(0);
 }
 
-void timer_init(timer_t *timer, int duration, void (*timer_handler)()) {
+void timer_init(timer_t *timer, int duration, void (*timer_handler)(), void* handler_arg) {
     timer->duration = duration;
     timer->state = 0;
     spinlock_init(&timer->lock);
     timer->handle_timer = timer_handler;
+    timer->handler_arg = handler_arg;
     pthread_create(&timer->thread_id, NULL, timer_thread, timer);
 }
 
