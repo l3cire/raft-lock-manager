@@ -39,8 +39,9 @@ int main(int argc, char* argv[]) {
     
     char* buffer = malloc(BUFFER_SIZE);
 
+    RPC_acquire_lock(&rpc); // acquire the lock
+
     for(int i = 0; i < 10; ++i) { // write msg to file_0 100 times
-	RPC_acquire_lock(&rpc); // acquire the lock
 
 	for(int j = 0; j < strlen(msg); ++j) { // write a message character by character
 	    buffer[0] = msg[j];
@@ -48,7 +49,7 @@ int main(int argc, char* argv[]) {
 	    usleep(10000);
 	}
 
-        RPC_release_lock(&rpc); // release the lock
+        //RPC_release_lock(&rpc); // release the lock
     }
 
     // close RPC connections
