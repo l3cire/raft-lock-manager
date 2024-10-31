@@ -14,6 +14,7 @@ typedef struct rpc_conn {
 } rpc_conn_t;
 
 #define RPC_READ_TIEMOUT 100
+#define RPC_RETRY_LIMIT 10
 
 
 //This function should set up a socket and bind it to src_port

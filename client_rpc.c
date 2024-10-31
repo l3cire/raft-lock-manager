@@ -17,10 +17,16 @@ int send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
     bzero(&response, RESPONSE_SIZE);
     rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
     //printf("lock server: %s\n", response.message);
+    int n_attempts = 1;
     while((rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN)) || (rc > 0 && response.rc == E_IN_PROGRESS) || (rc > 0 && response.vtime < packet->vtime)) {
 	if(rc < 0) {
+	    if(n_attempts >= RPC_RETRY_LIMIT) {
+		printf("rpc retry limit reached: server not responding\n");
+		exit(1);
+	    }
 	    rc = UDP_Write(rpc->sd, &rpc->send_addr, (char*)packet, PACKET_SIZE);
-	}
+	    n_attempts ++;
+	} else n_attempts = 0;
 	rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
     }
     return response.rc;
