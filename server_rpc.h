@@ -8,10 +8,13 @@
 #define MAX_ID 1000
 
 
+// client_process_data
+// stores the data of the client connected to the server
+// created when init RPC is called and freed when close RPC is called 
+//		state, vtime, and last_response are all protected by the lock
 typedef struct client_process_data {
 	int id;
 	int state;
-	int holds_lock;
 	int vtime;
 	response_info_t last_response;
 	spinlock_t lock;
@@ -24,6 +27,7 @@ typedef int (*append_file_handler)(int client_id, char* filename, char* buffer, 
 
 
 // RPC connection structure specifies handlers for different RPCs
+//		client_table is protected by the client_table_lock: creating/accessing each element should be done while holding a lock
 typedef struct server_rpc_conn {
 	int sd;
 	client_process_data_t* client_table[MAX_ID];

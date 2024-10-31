@@ -3,7 +3,6 @@ Below there are the main invariants that need to hold for the client processes:
     - This implies that a client has to get the response from the server before it can issue the next request
 - The first request is always 'RPC_init'
 - Each client has a unique client id specified to RPC_init
-- Client repeats the same request until the server response that the request has been handled. In particular, client will repeat the request iff (1) the server hasn't responded after a timeout or (2) the server has responded that the request is still being processed. 
 
 Here are the main invariants that must be maintained for the server:
 - The server holds information about the clients in the 'client_table' structure. This table is protected by the 'client_table_lock': accessing each element of the table and modifying the table entries should be done only while holding this lock.
