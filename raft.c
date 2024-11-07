@@ -21,7 +21,7 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, int id, i
     raft->id = id;
 
     raft->rpc_sd = UDP_Open(port);
-    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT); // election timeout will depend on a process;
+    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + 10*id); // election timeout will depend on a process;
     
     raft->config = config;
     raft->state = FOLLOWER;
@@ -42,7 +42,7 @@ void* election_thread(void* arg);
 void Raft_RPC_listen(raft_state_t *raft) {
     pthread_t req_thread_id;
     
-    printf("(%i[%i]) starting server\n", raft->id, raft->current_term);
+    //printf("(%i[%i]) starting server\n", raft->id, raft->current_term);
     while(1) {
 	raft_thread_arg_t *arg = malloc(sizeof(raft_thread_arg_t));
 	bzero(arg, sizeof(raft_thread_arg_t));
@@ -50,7 +50,7 @@ void Raft_RPC_listen(raft_state_t *raft) {
 	int rc = UDP_Read(raft->rpc_sd, &arg->addr, (char*)&arg->packet, sizeof(raft_packet_t));
 	if(rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN) && raft->state == FOLLOWER) {
 	    spinlock_acquire(&raft->lock);
-	    printf("(%i[%i]) follower timeout -- starting election\n", raft->id, raft->current_term);
+	    //printf("(%i[%i]) follower timeout -- starting election\n", raft->id, raft->current_term);
 	    free(arg);
 	    pthread_create(&req_thread_id, NULL, election_thread, raft);
 	    pthread_detach(req_thread_id);
@@ -84,31 +84,27 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
 
     for(int i = 0; i < N_SERVERS; ++i) {
 	if(raft->config.ids[i] == raft->id) continue;
-	int rc = UDP_Write(raft->rpc_sd, &raft->config.servers[i], (char*)&packet, sizeof(packet));
-	if(rc < 0) {
-	    printf("server rpc sending error\n");
-	    exit(1);
-	}
+	UDP_Write(raft->rpc_sd, &raft->config.servers[i], (char*)&packet, sizeof(packet));
     }
 
     spinlock_release(&raft->lock);
 
     clock_t election_start = clock();
-    printf("(%i[%i]) about to start loop\n", raft->id, raft->current_term);
+    //printf("(%i[%i]) about to start loop\n", raft->id, raft->current_term);
     while(1) {
-	//printf("once more here %i\n", raft->id);
+	////printf("once more here %i\n", raft->id);
 	spinlock_acquire(&raft->lock);
-	//printf("here got the lock %i\n", raft->id);
+	////printf("here got the lock %i\n", raft->id);
 	if(raft->state != CANDIDATE) {
-	    printf("(%i[%i]) not a candidate anymore\n", raft->id, raft->current_term);
+	    //printf("(%i[%i]) not a candidate anymore\n", raft->id, raft->current_term);
 	    spinlock_release(&raft->lock);
 	    return 0;
 	}
 	clock_t time_diff = clock() - election_start;
 	int time_diff_msec = time_diff * 1000 / CLOCKS_PER_SEC;
-	//printf("here (%i)\n", raft->id);
+	////printf("here (%i)\n", raft->id);
 	if(time_diff_msec > ELECTION_TIMEOUT + 10*raft->id) {
-	    printf("(%i[%i]) vote timeout -- restarting election\n", raft->id, raft->current_term);
+	    //printf("(%i[%i]) vote timeout -- restarting election\n", raft->id, raft->current_term);
 	    return -1;
 	}
 	spinlock_release(&raft->lock);
@@ -116,25 +112,55 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     }
 }
 
+
+void Raft_append_entry(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
+    raft_packet_t packet;
+    packet.request_type = APPEND;
+    packet.data.append_r.term = raft->current_term;
+    packet.data.append_r.leader_id = raft->id;
+    packet.data.append_r.leader_commit = raft->commit_index;
+
+    int next_ind = raft->next_index[follower_id];
+    packet.data.append_r.prev_log_index = next_ind - 1;
+    packet.data.append_r.prev_log_term = (next_ind > raft->start_log_index) ? raft->log[next_ind - 1 - raft->start_log_index].term : -1;
+    packet.data.append_r.index = raft->request_index[follower_id];
+    if(next_ind == raft->start_log_index + raft->log_count) {
+	packet.data.append_r.entries_n = 0;
+    } else {
+	packet.data.append_r.entries_n = 1;
+	packet.data.append_r.entry = raft->log[next_ind - raft->start_log_index];
+    }
+    printf("(%i) appending entry (%i, %i), count = %i\n", raft->id, follower_id, next_ind, packet.data.append_r.entries_n);
+
+    UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
+    //printf("rc = %i = siseof = %i\n", rc, (int)sizeof(request));
+}
+
 void Raft_convert_to_leader(raft_state_t *raft) {
     // the lock must be acquired here!!!!!!
     raft->state = LEADER;
     raft->voted_for = -1;
     
-    for(int i = 0; i < N_SERVERS; ++i) {
+    raft->log_count = 4;
+    raft->log[0].term = raft->current_term;
+    raft->log[1].term = raft->current_term;
+    raft->log[2].term = raft->current_term;
+    raft->log[3].term = raft->current_term;
+
+    for(int i = 0; i < N_SERVERS+2; ++i) {
 	raft->next_index[i] = raft->log_count;
 	raft->match_index[i] = 0;
+	raft->request_index[i] = 0;
     }
-
+    
     raft_packet_t heartbeat;
     bzero(&heartbeat, sizeof(raft_packet_t));
     heartbeat.request_type = APPEND;
     heartbeat.data.append_r.term = raft->current_term;
     heartbeat.data.append_r.entries_n = 0;
     heartbeat.data.append_r.leader_id = raft->id;
-
+ 
     printf("(%i[%i]) elected as leader\n", raft->id, raft->current_term);
-
     while(1) {
 	if(raft->state != LEADER) {
 	    spinlock_release(&raft->lock);
@@ -142,16 +168,11 @@ void Raft_convert_to_leader(raft_state_t *raft) {
 	}
 	for(int i = 0; i < N_SERVERS; ++i) {
 	    if(raft->config.ids[i] == raft->id) continue;
-	    int rc = UDP_Write(raft->rpc_sd, &raft->config.servers[i], (char*)&heartbeat, sizeof(heartbeat));
-	    if(rc < 0) {
-		printf("server rpc sending error\n");
-		exit(1);
-	    }
+	    Raft_append_entry(raft, raft->config.ids[i], &raft->config.servers[i]);
 	}
-	printf("(%i[%i]) leader sent one heartbeat -- entering infinite loop \n", raft->id, raft->current_term);
-	while(1) {}
+	//printf("(%i[%i]) heartbeat\n", raft->id, raft->current_term);
 	spinlock_release(&raft->lock);
-	//TODO:: sleep(1)
+	usleep(HEARTBIT_TIME * 1000);
 	spinlock_acquire(&raft->lock);
     }
 }
@@ -159,13 +180,13 @@ void Raft_convert_to_leader(raft_state_t *raft) {
 void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) {
     spinlock_acquire(&raft->lock);
 
-    printf("	[%i -> %i] responded %i (terms %i -> %i)\n", response->id, raft->id, response->success, response->term, raft->current_term);
+    //printf("	[%i -> %i] responded %i (terms %i -> %i)\n", response->id, raft->id, response->success, response->term, raft->current_term);
     if(raft->current_term > response->term) {
 	spinlock_release(&raft->lock);
 	return;
     }
     if(raft->current_term < response->term) {
-	printf("(%i) GOT BEHIND, SWITCHING TO FOLLOWER\n", raft->current_term);
+	//printf("(%i) GOT BEHIND, SWITCHING TO FOLLOWER\n", raft->current_term);
 	raft->current_term = response->term;
 	raft->state = FOLLOWER;
 	raft->voted_for = -1;
@@ -179,13 +200,19 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 	    return;
 	}
 	raft->nvoted ++;
-	printf("(%i[%i]) nvoted = %i\n", raft->id, raft->current_term, raft->nvoted);
+	//printf("(%i[%i]) nvoted = %i\n", raft->id, raft->current_term, raft->nvoted);
 	if(raft->nvoted*2 > N_SERVERS) {
 	    Raft_convert_to_leader(raft);
 	    return;
 	}
-    } else if(raft->state == LEADER) {
-
+    } else if(raft->state == LEADER && response->request_type == APPEND && response->index == raft->request_index[response->id]) {
+	if(!response->success) {
+	    raft->next_index[response->id] --;
+	} else if(raft->next_index[response->id] < raft->start_log_index + raft->log_count) {
+	    raft->match_index[response->id] = raft->next_index[response->id];
+	    raft->next_index[response->id] ++;
+	}
+	raft->request_index[response->id] ++;
     }
 
     spinlock_release(&raft->lock);
@@ -194,7 +221,7 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft_vote_request_t *vote_r) {
     spinlock_acquire(&raft->lock);
 
-    printf("	[%i -> %i] request vote\n", vote_r->candidate_id, raft->id);
+    //printf("	[%i -> %i] request vote\n", vote_r->candidate_id, raft->id);
     if(raft->current_term < vote_r->term) {
 	raft->current_term = vote_r->term;
 	raft->state = FOLLOWER;
@@ -207,6 +234,7 @@ void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft
     packet.data.response.id = raft->id;
     packet.data.response.term = raft->current_term;
     packet.data.response.success = 0;
+    packet.data.response.request_type = VOTE;
     
     if(raft->current_term == vote_r->term && (raft->voted_for == -1 || raft->voted_for == vote_r->candidate_id)) {
 	int last_log_term = raft->log[raft->log_count - 1].term;
@@ -229,9 +257,7 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
     spinlock_acquire(&raft->lock);
 
     printf("	[%i -> %i] append request\n", append_r->leader_id, raft->id);
-    printf("(%i[%i]) entering infinite loop\n", raft->id, raft->current_term);
-    while(1) {}
-        
+    //printf("(%i[%i]) entering infinite loop\n", raft->id, raft->current_term);
     if(raft->current_term < append_r->term) {
 	raft->current_term = append_r->term;
 	raft->state = FOLLOWER;
@@ -243,22 +269,29 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
     packet.request_type = RESPONSE;
     packet.data.response.id = raft->id;
     packet.data.response.term = raft->current_term;
+    packet.data.response.request_type = APPEND;
+    packet.data.response.index = append_r->index;
 
     
-    if(raft->current_term == append_r->term && append_r->entries_n == 0) {
-	//TODO:: reset timer
-	packet.data.response.success = 1;
-    }else if(raft->current_term > append_r->term || (raft->log[append_r->prev_log_index - raft->start_log_index].term != append_r->prev_log_term)) {
+    if(raft->current_term > append_r->term || 
+		(append_r->prev_log_index >= raft->start_log_index + raft->log_count) || 
+		(append_r->prev_log_index >= raft->start_log_index && raft->log[append_r->prev_log_index - raft->start_log_index].term != append_r->prev_log_term)) {
 	packet.data.response.success = 0;
+	printf("    (%i) consistency check failed for prev_index = %i (term %i)\n", raft->id, append_r->prev_log_index, append_r->prev_log_term);
+    } else if(append_r->entries_n == 0) {
+	packet.data.response.success = 1;
     } else {
 	int index = append_r->prev_log_index - raft->start_log_index + 1;
 	if(raft->log_count - 1 >= index && raft->log[index].term != append_r->term) {
 	    raft->log_count = index + 1;
-    	}
+    	} else if (raft->log_count == index) {
+	    raft->log_count ++;
+	}
 	raft->log[index] = append_r->entry;
 	if(append_r->leader_commit > raft->commit_index) {
 	    raft->commit_index = (append_r->leader_commit > append_r->prev_log_index+1) ? append_r->prev_log_index + 1 : append_r->leader_commit;
 	}
+	printf("    (%i) replicated position %i with term value %i\n", raft->id, append_r->prev_log_index + 1, raft->log[index].term);
 	packet.data.response.success = 1;
     } 
     

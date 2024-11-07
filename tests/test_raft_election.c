@@ -34,12 +34,11 @@ int main(int argc, char* argv[]) {
 	} 
     }
 
-    printf("forked server %i\n", id);
 
     sleep(1);
     raft_state_t raft;
     bzero(&raft, sizeof(raft_state_t));
-    if(id != 1 && id != 3) {
+    if(1) {
 	Raft_server_init(&raft, config, id, 20000+id-1);
         Raft_RPC_listen(&raft);
     } else {

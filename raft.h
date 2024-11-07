@@ -9,6 +9,7 @@
 #define N_SERVERS 5 
 
 #define ELECTION_TIMEOUT 1000
+#define HEARTBIT_TIME 300
 
 typedef struct raft_configuration {
 	struct sockaddr_in servers[N_SERVERS];
@@ -41,8 +42,9 @@ typedef struct raft_state {
 	int commit_index;
 	int last_applied_index;
 
-	int next_index[N_SERVERS];
-	int match_index[N_SERVERS];
+	int next_index[N_SERVERS+2];
+	int match_index[N_SERVERS+2];
+	int request_index[N_SERVERS+2];
 } raft_state_t;
 
 typedef struct raft_append_request {
@@ -53,6 +55,7 @@ typedef struct raft_append_request {
 	raft_log_entry_t entry;
 	int entries_n;
 	int leader_commit;
+	int index;
 } raft_append_request_t;
 
 typedef struct raft_vote_request {
@@ -62,18 +65,24 @@ typedef struct raft_vote_request {
 	int last_log_term;
 } raft_vote_request_t;
 
+
+typedef enum request_type {
+	APPEND,
+	VOTE,
+	RESPONSE
+} request_type_t;
+
 typedef struct raft_response_packet {
 	int id;
 	int term;
 	int success;
+	request_type_t request_type;
+
+	int index;
 } raft_response_packet_t;
 
 typedef struct raft_packet {
-	enum req_t {
-		APPEND,
-		VOTE,
-		RESPONSE
-	} request_type;
+	request_type_t request_type;
 	union data {
 		raft_append_request_t append_r;
 		raft_vote_request_t vote_r;
