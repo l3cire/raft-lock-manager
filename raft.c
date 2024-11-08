@@ -160,7 +160,7 @@ void Raft_append_entry(raft_state_t *raft, int follower_id, struct sockaddr_in *
     int next_ind = raft->next_index[follower_id];
     packet.data.append_r.prev_log_index = next_ind - 1;
     packet.data.append_r.prev_log_term = Raft_get_log_term(raft, next_ind - 1); 
-    packet.data.append_r.index = raft->request_index[follower_id];
+    packet.data.append_r.request_id = raft->last_request_id[follower_id];
     if(next_ind == raft->log_count) {
 	packet.data.append_r.entries_n = 0;
 	printf("(%i) sending heartbeat to %i\n", raft->id, follower_id);
@@ -185,10 +185,10 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     raft->log[2].term = raft->current_term;
     raft->log[3].term = raft->current_term;
 
-    for(int i = 0; i < N_SERVERS+2; ++i) {
+    for(int i = 0; i <= MAX_SERVER_ID; ++i) {
 	raft->next_index[i] = raft->log_count;
 	raft->match_index[i] = 0;
-	raft->request_index[i] = 0;
+	raft->last_request_id[i] = 0;
     }
     
     Raft_print_state(raft);
@@ -236,14 +236,14 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 	    Raft_convert_to_leader(raft);
 	    return;
 	}
-    } else if(raft->state == LEADER && response->request_type == APPEND && response->index == raft->request_index[response->id]) {
+    } else if(raft->state == LEADER && response->request_id == raft->last_request_id[response->id]) {
 	if(!response->success) {
 	    raft->next_index[response->id] --;
 	} else if(raft->next_index[response->id] < raft->log_count) {
 	    raft->match_index[response->id] = raft->next_index[response->id];
 	    raft->next_index[response->id] ++;
 	}
-	raft->request_index[response->id] ++;
+	raft->last_request_id[response->id] ++;
     }
 
     spinlock_release(&raft->lock);
@@ -263,7 +263,7 @@ void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft
     packet.data.response.id = raft->id;
     packet.data.response.term = raft->current_term;
     packet.data.response.success = 0;
-    packet.data.response.request_type = VOTE;
+    packet.data.response.request_id = -1;
     
     if(raft->current_term == vote_r->term && raft->voted_for == -1) {
 	int last_log_term = Raft_get_log_term(raft, raft->log_count - 1); 
@@ -296,8 +296,7 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
     packet.request_type = RESPONSE;
     packet.data.response.id = raft->id;
     packet.data.response.term = raft->current_term;
-    packet.data.response.request_type = APPEND;
-    packet.data.response.index = append_r->index;
+    packet.data.response.request_id = append_r->request_id;
 
     
     if(raft->current_term > append_r->term || 

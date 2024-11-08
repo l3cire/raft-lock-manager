@@ -7,6 +7,7 @@
 #define __RAFT_h__
 #define LOG_SIZE 1000
 #define N_SERVERS 5 
+#define MAX_SERVER_ID 10
 
 #define ELECTION_TIMEOUT 1000
 #define HEARTBIT_TIME 300
@@ -22,29 +23,33 @@ typedef struct raft_log_entry {
 } raft_log_entry_t;
 
 typedef struct raft_state {
-	int rpc_sd;
+	// persistent state (updated on stable storage)
 	raft_configuration_t config;
 	int id;
+	int current_term;
+	int voted_for;
+	raft_log_entry_t log[LOG_SIZE];
+	int start_log_index;
+	int log_count;
+
+	// volatile state on all server
 	enum node_state {
 		LEADER,
 		CANDIDATE,
 		FOLLOWER
 	} state;
+	int rpc_sd;
 	spinlock_t lock;
-
-	int current_term;
-	int voted_for;
-	raft_log_entry_t log[LOG_SIZE];
-	int log_count;
-	int start_log_index;
-	int nvoted;
-
 	int commit_index;
 	int last_applied_index;
 
-	int next_index[N_SERVERS+2];
-	int match_index[N_SERVERS+2];
-	int request_index[N_SERVERS+2];
+	// volatile state on candidates (initialized at the start of an election)
+	int nvoted;
+
+	// volatile state on leaders (initialized after an election)
+	int next_index[MAX_SERVER_ID+1];
+	int match_index[MAX_SERVER_ID+1];
+	int last_request_id[MAX_SERVER_ID+1];
 } raft_state_t;
 
 typedef struct raft_append_request {
@@ -55,7 +60,7 @@ typedef struct raft_append_request {
 	raft_log_entry_t entry;
 	int entries_n;
 	int leader_commit;
-	int index;
+	int request_id;
 } raft_append_request_t;
 
 typedef struct raft_vote_request {
@@ -76,9 +81,8 @@ typedef struct raft_response_packet {
 	int id;
 	int term;
 	int success;
-	request_type_t request_type;
 
-	int index;
+	int request_id;
 } raft_response_packet_t;
 
 typedef struct raft_packet {
