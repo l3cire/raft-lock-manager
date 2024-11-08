@@ -3,12 +3,13 @@
 
 #include "spinlock.h"
 #include "udp.h"
+#include "packet_format.h"
 
 #define __RAFT_h__
 #define LOG_SIZE 1000
-#define LOG_BUFFER_SIZE 64
 #define N_SERVERS 5 
 #define MAX_SERVER_ID 10
+#define MAX_TRANSACTION_ENTRIES 10
 
 #define ELECTION_TIMEOUT 1000
 #define HEARTBIT_TIME 300
@@ -17,6 +18,11 @@ typedef struct raft_configuration {
 	struct sockaddr_in servers[N_SERVERS];
 	int ids[N_SERVERS];
 } raft_configuration_t;
+
+typedef struct raft_transaction_entry {
+	char filename[256];
+	char buffer[BUFFER_SIZE];	
+} raft_transaction_entry_t;
 
 typedef struct raft_log_entry {
 	int term;
@@ -27,11 +33,12 @@ typedef struct raft_log_entry {
 	} type;
 	int id;
 	int client;
-	char data[LOG_BUFFER_SIZE];
+
+	raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES];
 } raft_log_entry_t;
 
 
-typedef void (*raft_commit_handler)(char data[LOG_BUFFER_SIZE]);
+typedef void (*raft_commit_handler)(raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]);
 
 typedef struct raft_state {
 	// persistent state (updated on stable storage)
@@ -111,6 +118,6 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_comm
 
 void Raft_RPC_listen(raft_state_t *raft);
 
-int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, char data[LOG_BUFFER_SIZE]);
+int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]);
 
 #endif

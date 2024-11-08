@@ -11,8 +11,8 @@ void* raft_listener_thread(void* arg) {
     pthread_exit(0);
 }
 
-void commit_handler(char data[LOG_BUFFER_SIZE]) {
-    printf("(%i) COMMIT HANDLER: %s\n", id, data);
+void commit_handler(raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) {
+    printf("(%i) COMMIT HANDLER: %s\n", id, data[0].buffer);
 }
 
 int main(int argc, char* argv[]) {
@@ -60,8 +60,9 @@ int main(int argc, char* argv[]) {
     while(raft.state != LEADER) {}
     sleep(2);
     printf("ADDING NEW ENTRY\n");
-    char buf[LOG_BUFFER_SIZE];
-    sprintf(buf, "hello world");
-    Raft_append_entry(&raft, id, 0, buf);
+    raft_transaction_entry_t transaction[MAX_TRANSACTION_ENTRIES];
+    strcpy(transaction[0].buffer, "hello world");
+    //sprintf(buf, "hello world");
+    Raft_append_entry(&raft, id, 0, transaction);
     while(1) {}
 }

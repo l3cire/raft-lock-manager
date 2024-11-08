@@ -115,7 +115,7 @@ void Raft_RPC_listen(raft_state_t *raft) {
 }
 
 
-int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, char data[LOG_BUFFER_SIZE]) {
+int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) {
     spinlock_acquire(&raft->lock);
     if(raft->state != LEADER || raft->log_count == raft->start_log_index + LOG_SIZE) {
 	spinlock_release(&raft->lock);
@@ -127,7 +127,7 @@ int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, cha
     log->term = raft->current_term;
     log->n_servers_replicated = 1;
     log->type = CLIENT_LOG;
-    memcpy(log->data, data, LOG_BUFFER_SIZE);
+    memcpy(log->data, data, sizeof(raft_transaction_entry_t)*MAX_TRANSACTION_ENTRIES);
 
     spinlock_release(&raft->lock);
     return 0;
@@ -193,11 +193,11 @@ void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct 
     packet.data.append_r.request_id = raft->last_request_id[follower_id];
     if(next_ind == raft->log_count) {
 	packet.data.append_r.entries_n = 0;
-	printf("(%i) sending heartbeat to %i\n", raft->id, follower_id);
+	//printf("(%i) sending heartbeat to %i\n", raft->id, follower_id);
     } else {
 	packet.data.append_r.entries_n = 1;
 	packet.data.append_r.entry = *Raft_get_log(raft, next_ind); 
-	printf("(%i) appending entry (%i, %i), count = %i\n", raft->id, follower_id, next_ind, packet.data.append_r.entries_n);
+	//printf("(%i) appending entry (%i, %i), count = %i\n", raft->id, follower_id, next_ind, packet.data.append_r.entries_n);
     }
 
     UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
@@ -277,7 +277,7 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 		(++Raft_get_log(raft, raft->next_index[response->id])->n_servers_replicated)*2 > N_SERVERS) {
 		
 		Raft_commit_update(raft, raft->next_index[response->id]);
-		Raft_print_state(raft);
+		//Raft_print_state(raft);
 	    }
 	    raft->match_index[response->id] = raft->next_index[response->id];
 	    raft->next_index[response->id] ++;
@@ -363,7 +363,7 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
 	packet.data.response.success = 1;
     } 
 
-    Raft_print_state(raft);
+    //Raft_print_state(raft);
     
     UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
 
