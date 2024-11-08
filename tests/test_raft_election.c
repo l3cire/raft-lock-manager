@@ -1,6 +1,14 @@
 #include "../raft.h"
 #include "../udp.h"
+#include "pthread.h"
 #include <stdio.h>
+
+raft_state_t raft;
+
+void* raft_listener_thread(void* arg) {
+    Raft_RPC_listen(&raft);
+    pthread_exit(0);
+}
 
 int main(int argc, char* argv[]) {
     raft_configuration_t config;
@@ -36,12 +44,17 @@ int main(int argc, char* argv[]) {
 
 
     sleep(1);
-    raft_state_t raft;
     bzero(&raft, sizeof(raft_state_t));
-    if(1) {
-	Raft_server_init(&raft, config, id, 20000+id-1);
-        Raft_RPC_listen(&raft);
-    } else {
+    if(id == 1 || id == 3) {
 	while(1) {}
     }
+    Raft_server_init(&raft, config, id, 20000+id-1);
+    pthread_t tid;
+    pthread_create(&tid, NULL, raft_listener_thread, NULL);
+    while(raft.state != LEADER) {}
+    sleep(2);
+    printf("ADDING NEW ENTRY\n");
+    char buf[LOG_BUFFER_SIZE];
+    Raft_append_entry(&raft, buf);
+    while(1) {}
 }

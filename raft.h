@@ -6,6 +6,7 @@
 
 #define __RAFT_h__
 #define LOG_SIZE 1000
+#define LOG_BUFFER_SIZE 64
 #define N_SERVERS 5 
 #define MAX_SERVER_ID 10
 
@@ -20,7 +21,7 @@ typedef struct raft_configuration {
 typedef struct raft_log_entry {
 	int term;
 	int n_servers_replicated;
-	char* data;
+	char data[LOG_BUFFER_SIZE];
 } raft_log_entry_t;
 
 typedef struct raft_state {
@@ -99,5 +100,7 @@ typedef struct raft_packet {
 void Raft_server_init(raft_state_t *raft, raft_configuration_t config, int id, int port);
 
 void Raft_RPC_listen(raft_state_t *raft);
+
+int Raft_append_entry(raft_state_t *raft, char data[LOG_BUFFER_SIZE]);
 
 #endif

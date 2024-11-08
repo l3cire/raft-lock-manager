@@ -104,6 +104,25 @@ void Raft_RPC_listen(raft_state_t *raft) {
     }
 }
 
+
+int Raft_append_entry(raft_state_t *raft, char data[LOG_BUFFER_SIZE]) {
+    spinlock_acquire(&raft->lock);
+    if(raft->state != LEADER || raft->log_count == raft->start_log_index + LOG_SIZE) {
+	spinlock_release(&raft->lock);
+	return -1;
+    } 
+
+    raft->log_count ++;
+    raft_log_entry_t *log = Raft_get_log(raft, raft->log_count - 1);
+    log->term = raft->current_term;
+    log->n_servers_replicated = 1;
+    memcpy(log->data, data, LOG_BUFFER_SIZE);
+
+    spinlock_release(&raft->lock);
+    return 0;
+}
+
+
 int Raft_convert_to_candidate(raft_state_t *raft) {
     // the lock must be held before calling that function!!!!!!
     raft->current_term ++;
@@ -150,7 +169,7 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
 }
 
 
-void Raft_append_entry(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
+void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
     raft_packet_t packet;
     packet.request_type = APPEND;
     packet.data.append_r.term = raft->current_term;
@@ -179,16 +198,6 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     raft->state = LEADER;
     raft->voted_for = -1;
     
-    raft->log_count = 4;
-    raft->log[0].term = raft->current_term;
-    raft->log[0].n_servers_replicated = 1;
-    raft->log[1].term = raft->current_term;
-    raft->log[1].n_servers_replicated = 1;
-    raft->log[2].term = raft->current_term;
-    raft->log[2].n_servers_replicated = 1;
-    raft->log[3].term = raft->current_term;
-    raft->log[3].n_servers_replicated = 1;
-
     for(int i = 0; i <= MAX_SERVER_ID; ++i) {
 	raft->next_index[i] = raft->log_count;
 	raft->match_index[i] = 0;
@@ -205,7 +214,7 @@ void Raft_convert_to_leader(raft_state_t *raft) {
 	}
 	for(int i = 0; i < N_SERVERS; ++i) {
 	    if(raft->config.ids[i] == raft->id) continue;
-	    Raft_append_entry(raft, raft->config.ids[i], &raft->config.servers[i]);
+	    Raft_send_append_entry_request(raft, raft->config.ids[i], &raft->config.servers[i]);
 	}
 	//printf("(%i[%i]) heartbeat\n", raft->id, raft->current_term);
 	spinlock_release(&raft->lock);
