@@ -95,6 +95,4 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, int id, i
 
 void Raft_RPC_listen(raft_state_t *raft);
 
-void Raft_append_entries(raft_state_t *raft, char* entries[LOG_SIZE]);
-
 #endif
