@@ -24,6 +24,9 @@ typedef struct raft_log_entry {
 	char data[LOG_BUFFER_SIZE];
 } raft_log_entry_t;
 
+
+typedef void (*raft_commit_handler)(char data[LOG_BUFFER_SIZE]);
+
 typedef struct raft_state {
 	// persistent state (updated on stable storage)
 	raft_configuration_t config;
@@ -34,7 +37,7 @@ typedef struct raft_state {
 	int start_log_index;
 	int log_count;
 
-	// volatile state on all server
+	// volatile state on all servers
 	enum node_state {
 		LEADER,
 		CANDIDATE,
@@ -42,6 +45,7 @@ typedef struct raft_state {
 	} state;
 	int rpc_sd;
 	spinlock_t lock;
+	raft_commit_handler commit_handler;
 	int commit_index;
 	int last_applied_index;
 
@@ -97,7 +101,7 @@ typedef struct raft_packet {
 } raft_packet_t;
 
 
-void Raft_server_init(raft_state_t *raft, raft_configuration_t config, int id, int port);
+void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_commit_handler commit_handler, int id, int port);
 
 void Raft_RPC_listen(raft_state_t *raft);
 

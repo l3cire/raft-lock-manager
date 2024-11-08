@@ -58,12 +58,21 @@ int Raft_relli2absli(raft_state_t *raft, int relative_log_index) {
     return relative_log_index + raft->start_log_index;
 }
 
-void Raft_server_init(raft_state_t *raft, raft_configuration_t config, int id, int port) {
+
+void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
+    for(int i = raft->commit_index + 1; i <= new_commit_index; ++i) {
+	raft->commit_handler(Raft_get_log(raft, i)->data);
+    }
+    raft->commit_index = new_commit_index;
+}
+
+void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_commit_handler commit_handler, int id, int port) {
     raft->id = id;
 
     raft->rpc_sd = UDP_Open(port);
     UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + 10*id); // election timeout will depend on a process;
-    
+    raft->commit_handler = commit_handler;
+
     raft->config = config;
     raft->state = FOLLOWER;
     spinlock_init(&raft->lock);
@@ -257,7 +266,7 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 		Raft_get_log_term(raft, raft->next_index[response->id]) == raft->current_term &&
 		(++Raft_get_log(raft, raft->next_index[response->id])->n_servers_replicated)*2 > N_SERVERS) {
 		
-		raft->commit_index = raft->next_index[response->id];
+		Raft_commit_update(raft, raft->next_index[response->id]);
 		Raft_print_state(raft);
 	    }
 	    raft->match_index[response->id] = raft->next_index[response->id];
@@ -327,7 +336,7 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
     } else if(append_r->entries_n == 0) { // this means we are consistent 
 	packet.data.response.success = 1;
 	if(append_r->leader_commit > raft->commit_index) {
-	    raft->commit_index = append_r->leader_commit;
+	    Raft_commit_update(raft, append_r->leader_commit);
 	}
     } else {
 	int index = append_r->prev_log_index + 1;
@@ -338,7 +347,7 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
 	}
 	*Raft_get_log(raft, index) = append_r->entry;
 	if(append_r->leader_commit > raft->commit_index) {
-	    raft->commit_index = (append_r->leader_commit > index) ? index : append_r->leader_commit;
+	    Raft_commit_update(raft, (append_r->leader_commit > index) ? index : append_r->leader_commit);
 	}
 	//printf("    (%i) replicated position %i with term value %i\n", raft->id, append_r->prev_log_index + 1, raft->log[index].term);
 	packet.data.response.success = 1;
