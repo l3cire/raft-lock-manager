@@ -21,6 +21,12 @@ typedef struct raft_configuration {
 typedef struct raft_log_entry {
 	int term;
 	int n_servers_replicated;
+	enum log_entry_type {
+		CLIENT_LOG,
+		LEADER_LOG
+	} type;
+	int id;
+	int client;
 	char data[LOG_BUFFER_SIZE];
 } raft_log_entry_t;
 
@@ -105,6 +111,6 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_comm
 
 void Raft_RPC_listen(raft_state_t *raft);
 
-int Raft_append_entry(raft_state_t *raft, char data[LOG_BUFFER_SIZE]);
+int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, char data[LOG_BUFFER_SIZE]);
 
 #endif

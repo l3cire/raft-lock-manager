@@ -62,6 +62,6 @@ int main(int argc, char* argv[]) {
     printf("ADDING NEW ENTRY\n");
     char buf[LOG_BUFFER_SIZE];
     sprintf(buf, "hello world");
-    Raft_append_entry(&raft, buf);
+    Raft_append_entry(&raft, id, 0, buf);
     while(1) {}
 }

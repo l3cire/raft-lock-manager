@@ -61,6 +61,7 @@ int Raft_relli2absli(raft_state_t *raft, int relative_log_index) {
 
 void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     for(int i = raft->commit_index + 1; i <= new_commit_index; ++i) {
+	if(Raft_get_log(raft, i)->type == LEADER_LOG) continue;
 	raft->commit_handler(Raft_get_log(raft, i)->data);
     }
     raft->commit_index = new_commit_index;
@@ -114,7 +115,7 @@ void Raft_RPC_listen(raft_state_t *raft) {
 }
 
 
-int Raft_append_entry(raft_state_t *raft, char data[LOG_BUFFER_SIZE]) {
+int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, char data[LOG_BUFFER_SIZE]) {
     spinlock_acquire(&raft->lock);
     if(raft->state != LEADER || raft->log_count == raft->start_log_index + LOG_SIZE) {
 	spinlock_release(&raft->lock);
@@ -125,6 +126,7 @@ int Raft_append_entry(raft_state_t *raft, char data[LOG_BUFFER_SIZE]) {
     raft_log_entry_t *log = Raft_get_log(raft, raft->log_count - 1);
     log->term = raft->current_term;
     log->n_servers_replicated = 1;
+    log->type = CLIENT_LOG;
     memcpy(log->data, data, LOG_BUFFER_SIZE);
 
     spinlock_release(&raft->lock);
@@ -206,6 +208,14 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     // the lock must be acquired here!!!!!!
     raft->state = LEADER;
     raft->voted_for = -1;
+
+    // adding an artificial log entry in order to commit all previous ones
+    raft->log_count ++;
+    raft_log_entry_t *log = Raft_get_log(raft, raft->log_count - 1);
+    log->term = raft->current_term;
+    log->n_servers_replicated = 1;
+    log->type = LEADER_LOG;
+
     
     for(int i = 0; i <= MAX_SERVER_ID; ++i) {
 	raft->next_index[i] = raft->log_count;
