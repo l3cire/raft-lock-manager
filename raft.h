@@ -19,6 +19,7 @@ typedef struct raft_configuration {
 
 typedef struct raft_log_entry {
 	int term;
+	int n_servers_replicated;
 	char* data;
 } raft_log_entry_t;
 

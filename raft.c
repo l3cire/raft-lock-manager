@@ -181,9 +181,13 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     
     raft->log_count = 4;
     raft->log[0].term = raft->current_term;
+    raft->log[0].n_servers_replicated = 1;
     raft->log[1].term = raft->current_term;
+    raft->log[1].n_servers_replicated = 1;
     raft->log[2].term = raft->current_term;
+    raft->log[2].n_servers_replicated = 1;
     raft->log[3].term = raft->current_term;
+    raft->log[3].n_servers_replicated = 1;
 
     for(int i = 0; i <= MAX_SERVER_ID; ++i) {
 	raft->next_index[i] = raft->log_count;
@@ -240,6 +244,13 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 	if(!response->success) {
 	    raft->next_index[response->id] --;
 	} else if(raft->next_index[response->id] < raft->log_count) {
+	    if(raft->next_index[response->id] > raft->commit_index &&
+		Raft_get_log_term(raft, raft->next_index[response->id]) == raft->current_term &&
+		(++Raft_get_log(raft, raft->next_index[response->id])->n_servers_replicated)*2 > N_SERVERS) {
+		
+		raft->commit_index = raft->next_index[response->id];
+		Raft_print_state(raft);
+	    }
 	    raft->match_index[response->id] = raft->next_index[response->id];
 	    raft->next_index[response->id] ++;
 	}
@@ -304,8 +315,11 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
 		(Raft_get_log_term(raft, append_r->prev_log_index) != append_r->prev_log_term)) {
 	packet.data.response.success = 0;
 	//printf("    (%i) consistency check failed for prev_index = %i (term %i)\n", raft->id, append_r->prev_log_index, append_r->prev_log_term);
-    } else if(append_r->entries_n == 0) {
+    } else if(append_r->entries_n == 0) { // this means we are consistent 
 	packet.data.response.success = 1;
+	if(append_r->leader_commit > raft->commit_index) {
+	    raft->commit_index = append_r->leader_commit;
+	}
     } else {
 	int index = append_r->prev_log_index + 1;
 	if(index < raft->log_count && Raft_get_log_term(raft, index) != append_r->entry.term) { // rewrite log entries contradicting with new one
