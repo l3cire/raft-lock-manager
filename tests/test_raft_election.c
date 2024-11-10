@@ -18,8 +18,8 @@ void commit_handler(raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) {
 int main(int argc, char* argv[]) {
     raft_configuration_t config;
     for(int i = 0; i < N_SERVERS; ++i) {
-	config.ids[i] = i+1;
-	UDP_FillSockAddr(&config.servers[i], "localhost", 20000+i);
+	config.servers[i].id = i+1;
+	UDP_FillSockAddr(&config.servers[i].raft_socket, "localhost", 20000+i);
     }
 
     int pid1 = fork();

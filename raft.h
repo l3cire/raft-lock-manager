@@ -14,9 +14,14 @@
 #define ELECTION_TIMEOUT 1000
 #define HEARTBIT_TIME 300
 
+typedef struct raft_server_configuration {
+	struct sockaddr_in client_socket;
+	struct sockaddr_in raft_socket;
+	int id;
+} raft_server_configuration_t;
+
 typedef struct raft_configuration {
-	struct sockaddr_in servers[N_SERVERS];
-	int ids[N_SERVERS];
+	raft_server_configuration_t servers[N_SERVERS];
 } raft_configuration_t;
 
 typedef struct raft_transaction_entry {

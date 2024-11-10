@@ -3,6 +3,7 @@
 
 #include "udp.h"
 #include "packet_format.h"
+#include "raft.h"
 #include <stdatomic.h>
 
 typedef struct rpc_conn {
@@ -11,6 +12,9 @@ typedef struct rpc_conn {
 	struct sockaddr_in recv_addr;
 	int client_id;
 	atomic_int vtime;
+	
+	raft_configuration_t raft_config;
+	int current_leader_index;
 } rpc_conn_t;
 
 #define RPC_READ_TIEMOUT 100

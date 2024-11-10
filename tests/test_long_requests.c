@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include "../client_rpc.h"
-
+#include "../raft.h"
 /*
 Test lock behavior.
 
@@ -14,13 +14,34 @@ Creates one lock server process and 4 client processes that bind to distinct por
 
 
 int main(int argc, char* argv[]) {
-    // fork server process
-    int server_pid = fork();
-    if(server_pid == 0) {
-	int rs = execv("./bin/server", 0);
-	printf("exec failed, result: %i\n", rs);
-	exit(1);
+   /* 
+    raft_configuration_t config;
+    for(int i = 0; i < N_SERVERS; ++i) {
+	config.servers[i].id = i+1;
+	UDP_FillSockAddr(&config.servers[i].raft_socket, "localhost", 30000+i);
+	UDP_FillSockAddr(&config.servers[i].client_socket, "localhost", 10000+i);
     }
+
+    FILE *file = fopen("./raft_config", "wb");
+    fwrite(&config, sizeof(raft_configuration_t), 1, file);
+    fclose(file);
+   */
+   // fork server process
+    int server_pid[N_SERVERS];
+    for(int i = 0; i < N_SERVERS; ++i) {
+	server_pid[i] = fork();
+	if(server_pid[i] == 0) {
+	    char id_arg[2], client_port_arg[6], raft_port_arg[6]; 
+	    sprintf(id_arg, "%i", i+1);
+	    sprintf(client_port_arg, "%i", 10000+i);
+	    sprintf(raft_port_arg, "%i", 30000+i);
+	    char* args[] = {"./raft_config", id_arg, client_port_arg, raft_port_arg, NULL};
+	    int rs = execv("./bin/server", args);
+	    printf("exec failed, result: %i\n", rs);
+	    exit(1);
+	}
+    }
+    while(1) {}
 
     // wait one second to make sure the server has started receiving requests
     sleep(1);
@@ -35,7 +56,7 @@ int main(int argc, char* argv[]) {
     RPC_init(&rpc, client_id, 20000 + client_id, 10000, "localhost");
     
     char* msg = malloc(BUFFER_SIZE); 
-    sprintf(msg, "hello from client %i\n", client_id);
+    sprintf(msg, "hello from client %i", client_id);
     
     char* buffer = malloc(BUFFER_SIZE);
 
@@ -43,15 +64,17 @@ int main(int argc, char* argv[]) {
 
     for(int i = 0; i < 10; ++i) { // write msg to file_0 100 times
 
+	char filename[7];
+	sprintf(filename, "file_%i", i);
 	for(int j = 0; j < strlen(msg); ++j) { // write a message character by character
 	    buffer[0] = msg[j];
-	    RPC_append_file(&rpc, "file_0", buffer);
-	    usleep(10000);
+	    RPC_append_file(&rpc, filename, buffer);
+	    //usleep(10000);
 	}
 
         //RPC_release_lock(&rpc); // release the lock
     }
-
+    RPC_release_lock(&rpc);
     // close RPC connections
     RPC_close(&rpc);
 
@@ -67,6 +90,9 @@ int main(int argc, char* argv[]) {
 
     // if we are the original process, kill the server and exit
     if(a > 0 && b > 0) {
-	kill(server_pid, SIGKILL);
+	while(1) {}
+	for(int i = 0; i < N_SERVERS; ++i) {
+	    kill(server_pid[i], SIGKILL);
+	}
     }
 }

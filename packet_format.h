@@ -16,7 +16,9 @@ typedef enum response_code {
 	E_IN_PROGRESS = -2,
 	E_NO_CLIENT = -3,
 	E_LOCK = -4,
-	E_LOCK_EXP = -5
+	E_LOCK_EXP = -5,
+	E_TRANSACTION_LIMIT = -6,
+	E_SERVER = -7
 } response_code_t;
 
 typedef struct packet_info{

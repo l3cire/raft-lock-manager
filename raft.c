@@ -150,8 +150,8 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     packet.data.vote_r.last_log_term = Raft_get_log_term(raft, raft->log_count-1);
 
     for(int i = 0; i < N_SERVERS; ++i) {
-	if(raft->config.ids[i] == raft->id) continue;
-	UDP_Write(raft->rpc_sd, &raft->config.servers[i], (char*)&packet, sizeof(packet));
+	if(raft->config.servers[i].id == raft->id) continue;
+	UDP_Write(raft->rpc_sd, &raft->config.servers[i].raft_socket, (char*)&packet, sizeof(packet));
     }
 
     spinlock_release(&raft->lock);
@@ -232,8 +232,8 @@ void Raft_convert_to_leader(raft_state_t *raft) {
 	    break;
 	}
 	for(int i = 0; i < N_SERVERS; ++i) {
-	    if(raft->config.ids[i] == raft->id) continue;
-	    Raft_send_append_entry_request(raft, raft->config.ids[i], &raft->config.servers[i]);
+	    if(raft->config.servers[i].id == raft->id) continue;
+	    Raft_send_append_entry_request(raft, raft->config.servers[i].id, &raft->config.servers[i].raft_socket);
 	}
 	//printf("(%i[%i]) heartbeat\n", raft->id, raft->current_term);
 	spinlock_release(&raft->lock);
