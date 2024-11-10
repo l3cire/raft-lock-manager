@@ -63,6 +63,5 @@ int main(int argc, char* argv[]) {
     raft_transaction_entry_t transaction[MAX_TRANSACTION_ENTRIES];
     strcpy(transaction[0].buffer, "hello world");
     //sprintf(buf, "hello world");
-    Raft_append_entry(&raft, id, 0, transaction);
     while(1) {}
 }

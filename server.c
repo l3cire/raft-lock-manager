@@ -13,6 +13,8 @@ tmdspinlock_t lock;
 raft_state_t raft;
 raft_log_entry_t current_log_entry;
 
+char files_dir[128];
+
 void print_transaction() {
     printf("TRANSACTION %i, CLIENT %i\n", current_log_entry.id, current_log_entry.client);
     for(int i = 0; i < MAX_TRANSACTION_ENTRIES; ++i) {
@@ -35,6 +37,8 @@ int handle_lock_acquire(int client_id, char* message) {
 }
 
 int handle_lock_release(int client_id, char* message) {
+    print_transaction();
+    Raft_append_entry(&raft, &current_log_entry); 
     if(tmdspinlock_release(&lock, client_id) < 0) {
 	strcpy(message, "lock released before being acquired");
 	return E_LOCK_EXP;
@@ -64,18 +68,6 @@ int handle_append_file(int client_id, char* filename, char* buffer, char* messag
 	}
     }
 
-    /*
-    char fn[25] = "./server_files/";
-    strcat(fn, filename);
-    FILE *f = fopen(fn, "a");
-    if(!f) {
-	strcpy(message, "file cannot be opened");
-	return E_FILE;
-    }
-    fprintf(f, "%s", buffer);
-    fclose(f);
-    strcpy(message, "success");
-    */
     if(result == E_TRANSACTION_LIMIT) {
 	strcpy(message, "too many files modified within one transaction");
     } else {
@@ -86,7 +78,20 @@ int handle_append_file(int client_id, char* filename, char* buffer, char* messag
 }
 
 void handle_raft_commit(raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) {
+    printf("raft server %i committing transaction\n", raft.id);
+    for(int i = 0; i < MAX_TRANSACTION_ENTRIES; ++i) {
+	char* filename = data[i].filename;
+	char* buffer = data[i].buffer;
+	if(filename[0] == 0) break;
 
+	char fn[256];
+	strcpy(fn, files_dir);
+	strcat(fn, filename);
+	FILE *f = fopen(fn, "a");
+	if(!f) continue;
+	fprintf(f, "%s", buffer);
+	fclose(f);
+    }
 }
 
 void* raft_listener_thread(void* arg) {
@@ -102,13 +107,20 @@ int main(int argc, char *argv[]) {
     fclose(f);
 
     int id = atoi(argv[1]);
-    int port_client = atoi(argv[2]);
-    int port_raft = atoi(argv[3]);
-    printf("starting server %i on port %i (raft port %i)\n", id, port_client, port_raft);
+    int port_client;
+    int port_raft;
+    for(int i = 0; i < N_SERVERS; ++i) {
+	if(config.servers[i].id == id) {
+	    port_client = ntohs(config.servers[i].client_socket.sin_port);
+	    port_raft = ntohs(config.servers[i].raft_socket.sin_port);
+	    strcpy(files_dir, config.servers[i].file_directory);
+	}
+    }
+    printf("starting server %i on port %i (raft port %i) -- saving files to %s\n", id, port_client, port_raft, files_dir);
 /*
     printf("config for the server is: \n");
     for(int i = 0; i < N_SERVERS; ++i) {
-	printf("    server %i, client_port = %i, raft_port = %i\n", config.servers[i].id, ntohs(config.servers[i].client_socket.sin_port), ntohs(config.servers[i].raft_socket.sin_port));
+	printf("    server %i, client_port = %i, raft_port = %i, files_dir= %s \n", config.servers[i].id, ntohs(config.servers[i].client_socket.sin_port), ntohs(config.servers[i].raft_socket.sin_port), config.servers[i].file_directory);
     }
 */
     Raft_server_init(&raft, config, handle_raft_commit, id, port_raft); 

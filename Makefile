@@ -10,7 +10,7 @@ SRCS_TESTS			:= test_lock.c test_long_requests.c test_timer.c test_tmdspinlock.c
 
 BUILD_DIR			:= ./build
 BIN_DIR				:= ./bin
-FILES_DIR			:= ./server_files
+FILES_DIR			:= ./server_files_1 ./server_files_2 ./server_files_3 ./server_files_4/ ./server_files_5/
 
 OBJ_CLIENT			:= $(addprefix $(BUILD_DIR)/, $(notdir $(SRCS_CLIENT:.c=.o)))
 OBJ_LOCK_SERVER		:= $(addprefix $(BUILD_DIR)/, $(notdir $(SRCS_LOCK_SERVER:.c=.o)))

@@ -17,6 +17,7 @@
 typedef struct raft_server_configuration {
 	struct sockaddr_in client_socket;
 	struct sockaddr_in raft_socket;
+	char file_directory[128];
 	int id;
 } raft_server_configuration_t;
 
@@ -123,6 +124,6 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_comm
 
 void Raft_RPC_listen(raft_state_t *raft);
 
-int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]);
+int Raft_append_entry(raft_state_t *raft, raft_log_entry_t *log); 
 
 #endif

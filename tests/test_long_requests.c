@@ -14,18 +14,19 @@ Creates one lock server process and 4 client processes that bind to distinct por
 
 
 int main(int argc, char* argv[]) {
-   /* 
+/* 
     raft_configuration_t config;
     for(int i = 0; i < N_SERVERS; ++i) {
 	config.servers[i].id = i+1;
 	UDP_FillSockAddr(&config.servers[i].raft_socket, "localhost", 30000+i);
 	UDP_FillSockAddr(&config.servers[i].client_socket, "localhost", 10000+i);
+	sprintf(config.servers[i].file_directory, "./server_files_%i/", i+1);
     }
 
     FILE *file = fopen("./raft_config", "wb");
     fwrite(&config, sizeof(raft_configuration_t), 1, file);
     fclose(file);
-   */
+*/ 
 
     raft_configuration_t config;
     FILE *f = fopen("./raft_config", "rb");
@@ -42,11 +43,9 @@ int main(int argc, char* argv[]) {
 	    if(i == 0) {
 		exit(0);
 	    }
-	    char id_arg[2], client_port_arg[6], raft_port_arg[6]; 
+	    char id_arg[2]; 
 	    sprintf(id_arg, "%i", i+1);
-	    sprintf(client_port_arg, "%i", 10000+i);
-	    sprintf(raft_port_arg, "%i", 30000+i);
-	    char* args[] = {"./raft_config", id_arg, client_port_arg, raft_port_arg, NULL};
+	    char* args[] = {"./raft_config", id_arg, NULL};
 	    int rs = execv("./bin/server", args);
 	    printf("exec failed, result: %i\n", rs);
 	    exit(1);
@@ -66,7 +65,6 @@ int main(int argc, char* argv[]) {
     rpc_conn_t rpc;
     RPC_init(&rpc, client_id, 20000 + client_id, config);
     
-    while(1) {}
     char* msg = malloc(BUFFER_SIZE); 
     sprintf(msg, "hello from client %i", client_id);
     

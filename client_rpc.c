@@ -42,7 +42,6 @@ int send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
 	    rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
 	} else break;
     }
-    printf("successfully got the leader server with id: %i\n", rpc->raft_config.servers[rpc->current_leader_index].id);
     return response.rc;
 }
 

@@ -115,7 +115,7 @@ void Raft_RPC_listen(raft_state_t *raft) {
 }
 
 
-int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) {
+int Raft_append_entry(raft_state_t *raft, raft_log_entry_t *log) { 
     spinlock_acquire(&raft->lock);
     if(raft->state != LEADER || raft->log_count == raft->start_log_index + LOG_SIZE) {
 	spinlock_release(&raft->lock);
@@ -123,11 +123,10 @@ int Raft_append_entry(raft_state_t *raft, int client_id, int transaction_id, raf
     } 
 
     raft->log_count ++;
-    raft_log_entry_t *log = Raft_get_log(raft, raft->log_count - 1);
     log->term = raft->current_term;
     log->n_servers_replicated = 1;
     log->type = CLIENT_LOG;
-    memcpy(log->data, data, sizeof(raft_transaction_entry_t)*MAX_TRANSACTION_ENTRIES);
+    memcpy(Raft_get_log(raft, raft->log_count-1), log, sizeof(raft_log_entry_t));
 
     spinlock_release(&raft->lock);
     return 0;
