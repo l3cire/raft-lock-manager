@@ -26,11 +26,22 @@ int main(int argc, char* argv[]) {
     fwrite(&config, sizeof(raft_configuration_t), 1, file);
     fclose(file);
    */
+
+    raft_configuration_t config;
+    FILE *f = fopen("./raft_config", "rb");
+    fread(&config, sizeof(raft_configuration_t), 1, f);
+    fclose(f);
+
+
+
    // fork server process
     int server_pid[N_SERVERS];
     for(int i = 0; i < N_SERVERS; ++i) {
 	server_pid[i] = fork();
 	if(server_pid[i] == 0) {
+	    if(i == 0) {
+		exit(0);
+	    }
 	    char id_arg[2], client_port_arg[6], raft_port_arg[6]; 
 	    sprintf(id_arg, "%i", i+1);
 	    sprintf(client_port_arg, "%i", 10000+i);
@@ -41,20 +52,21 @@ int main(int argc, char* argv[]) {
 	    exit(1);
 	}
     }
-    while(1) {}
+    //while(1) {}
 
     // wait one second to make sure the server has started receiving requests
     sleep(1);
 
     // fork 4 client processes
-    int a = fork();
-    int b = fork();
-    int client_id = (a > 0) ? ((b > 0) ? 0 : 1) : ((b > 0) ? 2 : 3);
+    //int a = fork();
+    //int b = fork();
+    int client_id = 0;//(a > 0) ? ((b > 0) ? 0 : 1) : ((b > 0) ? 2 : 3);
 
     // initialize RPCs for each client
     rpc_conn_t rpc;
-    RPC_init(&rpc, client_id, 20000 + client_id, 10000, "localhost");
+    RPC_init(&rpc, client_id, 20000 + client_id, config);
     
+    while(1) {}
     char* msg = malloc(BUFFER_SIZE); 
     sprintf(msg, "hello from client %i", client_id);
     
@@ -79,17 +91,9 @@ int main(int argc, char* argv[]) {
     RPC_close(&rpc);
 
     // wait for all children clients to finish writing
-    int status;
-    if(a > 0) {
-	waitpid(a, &status, 0);
-    }
-
-    if(b > 0) {
-	waitpid(b, &status, 0);
-    }
 
     // if we are the original process, kill the server and exit
-    if(a > 0 && b > 0) {
+    if(1) {
 	while(1) {}
 	for(int i = 0; i < N_SERVERS; ++i) {
 	    kill(server_pid[i], SIGKILL);

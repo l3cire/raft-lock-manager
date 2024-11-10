@@ -23,9 +23,6 @@ void print_transaction() {
 }
 
 int handle_lock_acquire(int client_id, char* message) {
-    if(raft.state != LEADER) {
-	return E_SERVER;
-    }
     if(tmdspinlock_acquire(&lock, client_id) < 0) {
 	strcpy(message, "the client already has the lock\n");
 	return E_LOCK;
@@ -38,9 +35,6 @@ int handle_lock_acquire(int client_id, char* message) {
 }
 
 int handle_lock_release(int client_id, char* message) {
-    if(raft.state != LEADER) {
-	return E_SERVER;
-    }
     if(tmdspinlock_release(&lock, client_id) < 0) {
 	strcpy(message, "lock released before being acquired");
 	return E_LOCK_EXP;
@@ -50,9 +44,6 @@ int handle_lock_release(int client_id, char* message) {
 }
 
 int handle_append_file(int client_id, char* filename, char* buffer, char* message) {
-    if(raft.state != LEADER) {
-	return E_SERVER;
-    }
     if(tmdspinlock_pause_if_owner(&lock, client_id) < 0) {
 	strcpy(message, "trying to write to file without holding a lock");
 	return E_LOCK_EXP;
@@ -114,18 +105,18 @@ int main(int argc, char *argv[]) {
     int port_client = atoi(argv[2]);
     int port_raft = atoi(argv[3]);
     printf("starting server %i on port %i (raft port %i)\n", id, port_client, port_raft);
-
+/*
     printf("config for the server is: \n");
     for(int i = 0; i < N_SERVERS; ++i) {
 	printf("    server %i, client_port = %i, raft_port = %i\n", config.servers[i].id, ntohs(config.servers[i].client_socket.sin_port), ntohs(config.servers[i].raft_socket.sin_port));
     }
-
+*/
     Raft_server_init(&raft, config, handle_raft_commit, id, port_raft); 
     pthread_t tid;
     pthread_create(&tid, NULL, raft_listener_thread, NULL);
 
     bzero(&rpc, sizeof(server_rpc_conn_t));
-    Server_RPC_init(&rpc, port_client);
+    Server_RPC_init(&rpc, &raft, port_client);
 
     // set up handlers for the RPCs
     rpc.handle_lock_acquire = handle_lock_acquire;

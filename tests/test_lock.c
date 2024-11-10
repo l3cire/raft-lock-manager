@@ -14,6 +14,12 @@ Creates one lock server process and 4 client processes that bind to distinct por
 
 
 int main(int argc, char* argv[]) {
+    raft_configuration_t config;
+    FILE *f = fopen("./raft_config", "rb");
+    fread(&config, sizeof(raft_configuration_t), 1, f);
+    fclose(f);
+
+
     bool use_lock_requests = true; // indicates whether or not to use locks
     if(argc > 1 && strcmp(argv[1], "no-use-lock") == 0) {
 	use_lock_requests = false;
@@ -37,7 +43,7 @@ int main(int argc, char* argv[]) {
 
     // initialize RPCs for each client
     rpc_conn_t rpc;
-    RPC_init(&rpc, client_id, 20000 + client_id, 10000, "localhost");
+    RPC_init(&rpc, client_id, 20000 + client_id, config);
     
     char* msg = malloc(BUFFER_SIZE); 
     sprintf(msg, "hello from client %i\n", client_id);

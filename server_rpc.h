@@ -4,6 +4,7 @@
 #include "udp.h"
 #include "packet_format.h"
 #include "spinlock.h"
+#include "raft.h"
 
 #define MAX_ID 1000
 
@@ -37,6 +38,7 @@ typedef struct server_rpc_conn {
 	lock_release_handler handle_lock_release;
 	append_file_handler handle_append_file;
 
+	raft_state_t *raft;
 } server_rpc_conn_t;
 
 typedef enum client_state {
@@ -44,7 +46,7 @@ typedef enum client_state {
 	WAITING
 } client_state_t;
 
-void Server_RPC_init(server_rpc_conn_t *rpc, int port);
+void Server_RPC_init(server_rpc_conn_t *rpc, raft_state_t *raft, int port);
 
 void Server_RPC_listen(server_rpc_conn_t *rpc);
 

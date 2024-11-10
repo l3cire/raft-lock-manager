@@ -1,4 +1,5 @@
 #include "server_rpc.h"
+#include "raft.h"
 #include "udp.h"
 #include "packet_format.h"
 #include "spinlock.h"
@@ -11,8 +12,9 @@ typedef struct request {
 } request_t;
 
 
-void Server_RPC_init(server_rpc_conn_t *rpc, int port) {
+void Server_RPC_init(server_rpc_conn_t *rpc, raft_state_t *raft, int port) {
     rpc->sd = UDP_Open(port);
+    rpc->raft = raft;
     
     spinlock_init(&rpc->client_table_lock);
     bzero(rpc->client_table, sizeof(rpc->client_table));
@@ -48,6 +50,14 @@ void* handle_packet(void *arg) {
     bzero(&response, RESPONSE_SIZE);
     response.client_id = packet->client_id;
     response.vtime = packet->vtime;
+
+    if(rpc->raft->state != LEADER) {
+	response.rc = E_SERVER;
+	sprintf(response.message, "this is not the leader server; address another one\n");
+	send_packet_response(rpc, addr, &response);
+	free(arg);
+	pthread_exit(0);
+    }
     
     // get the client data structure -- if it does not exist and the request is init, create a new structure;
     spinlock_acquire(&rpc->client_table_lock);

@@ -1,5 +1,6 @@
 #include "client_rpc.h"
 #include "packet_format.h"
+#include "raft.h"
 #include "udp.h"
 #include <errno.h>
 #include <stdio.h>
@@ -7,7 +8,7 @@
 int send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
     packet->vtime = rpc->vtime ++;
     packet->client_id = rpc->client_id;
-    int rc = UDP_Write(rpc->sd, &rpc->send_addr, (char*)packet, PACKET_SIZE);
+    int rc = UDP_Write(rpc->sd, &rpc->raft_config.servers[rpc->current_leader_index].client_socket, (char*)packet, PACKET_SIZE);
     if(rc < 0) {
 	printf("RPC:: failed to send packet");
 	exit(1);
@@ -18,25 +19,39 @@ int send_packet(rpc_conn_t *rpc, packet_info_t *packet) {
     rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
     //printf("lock server: %s\n", response.message);
     int n_attempts = 1;
-    while((rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN)) || (rc > 0 && response.rc == E_IN_PROGRESS) || (rc > 0 && response.vtime < packet->vtime)) {
-	if(rc < 0) {
+    while(1) {
+	if(rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN)) {
 	    if(n_attempts >= RPC_RETRY_LIMIT) {
-		printf("rpc retry limit reached: server not responding\n");
-		exit(1);
+		// if retried too many times, switch to another server
+		rpc->current_leader_index = (rpc->current_leader_index + 1) % N_SERVERS;
+		n_attempts = 0;
 	    }
-	    rc = UDP_Write(rpc->sd, &rpc->send_addr, (char*)packet, PACKET_SIZE);
+	    rc = UDP_Write(rpc->sd, &rpc->raft_config.servers[rpc->current_leader_index].client_socket, (char*)packet, PACKET_SIZE);
+	    rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
 	    n_attempts ++;
-	} else n_attempts = 0;
-	rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
+	    continue;
+	} else if(rc < 0) break;
+
+	n_attempts = 0;
+
+	if(response.rc == E_IN_PROGRESS || response.vtime < packet->vtime) {
+	    rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
+	} else if(response.rc == E_SERVER) {
+	    rpc->current_leader_index = (rpc->current_leader_index + 1) % N_SERVERS;
+	    rc = UDP_Write(rpc->sd, &rpc->raft_config.servers[rpc->current_leader_index].client_socket, (char*)packet, PACKET_SIZE);
+	    rc = UDP_Read(rpc->sd, &rpc->recv_addr, (char*)&response, RESPONSE_SIZE);
+	} else break;
     }
+    printf("successfully got the leader server with id: %i\n", rpc->raft_config.servers[rpc->current_leader_index].id);
     return response.rc;
 }
 
-void RPC_init(rpc_conn_t *rpc, int id, int src_port, int dst_port, char dst_addr[]) {
+void RPC_init(rpc_conn_t *rpc, int id, int src_port, raft_configuration_t raft_config){
     rpc->sd = UDP_Open(src_port);
     rpc->vtime = 0;
     rpc->client_id = id;
-    UDP_FillSockAddr(&rpc->send_addr, dst_addr, dst_port);
+    rpc->raft_config = raft_config;
+    rpc->current_leader_index = 0;
     UDP_SetReceiveTimeout(rpc->sd, RPC_READ_TIEMOUT);
 
     packet_info_t packet;

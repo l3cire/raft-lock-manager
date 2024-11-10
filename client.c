@@ -2,8 +2,14 @@
 #include "client_rpc.h"
 
 int main(int argc, char *argv[]) {
+    raft_configuration_t config;
+    FILE *f = fopen(argv[0], "rb");
+    fread(&config, sizeof(raft_configuration_t), 1, f);
+    fclose(f);
+
+
     rpc_conn_t rpc;
-    RPC_init(&rpc, 0, 20000, 10000, "localhost");
+    RPC_init(&rpc, 0, 20000, config); 
     printf("rpc initialization successfull\n");
     
     RPC_acquire_lock(&rpc);
