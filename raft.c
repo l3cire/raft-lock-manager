@@ -59,6 +59,26 @@ int Raft_relli2absli(raft_state_t *raft, int relative_log_index) {
 }
 
 
+int Raft_is_entry_committed(raft_state_t *raft, int term, int id) {
+    spinlock_acquire(&raft->lock);
+    for(int i = raft->start_log_index; i < raft->log_count; ++i) {
+	raft_log_entry_t *log = Raft_get_log(raft, i);
+	if(log->term == term && log->id == id) {
+	    int res = (raft->commit_index >= i) ? 1 : 0;
+	    spinlock_release(&raft->lock);
+	    return res;
+	} else if(log->term > term) {
+	    int res = (raft->commit_index >= i) ? -1 : 0;
+	    spinlock_release(&raft->lock);
+	    return res;
+	}
+    }
+    spinlock_release(&raft->lock);
+    return 0;
+}
+
+
+
 void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     for(int i = raft->commit_index + 1; i <= new_commit_index; ++i) {
 	if(Raft_get_log(raft, i)->type == LEADER_LOG) continue;

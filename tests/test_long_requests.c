@@ -14,19 +14,19 @@ Creates one lock server process and 4 client processes that bind to distinct por
 
 
 int main(int argc, char* argv[]) {
-/* 
+   /* 
     raft_configuration_t config;
     for(int i = 0; i < N_SERVERS; ++i) {
 	config.servers[i].id = i+1;
 	UDP_FillSockAddr(&config.servers[i].raft_socket, "localhost", 30000+i);
 	UDP_FillSockAddr(&config.servers[i].client_socket, "localhost", 10000+i);
-	sprintf(config.servers[i].file_directory, "./server_files_%i/", i+1);
+	sprintf(config.servers[i].files_directory, "./server_files_%i/", i+1);
     }
 
     FILE *file = fopen("./raft_config", "wb");
     fwrite(&config, sizeof(raft_configuration_t), 1, file);
     fclose(file);
-*/ 
+   */
 
     raft_configuration_t config;
     FILE *f = fopen("./raft_config", "rb");
@@ -57,16 +57,16 @@ int main(int argc, char* argv[]) {
     sleep(1);
 
     // fork 4 client processes
-    //int a = fork();
-    //int b = fork();
-    int client_id = 0;//(a > 0) ? ((b > 0) ? 0 : 1) : ((b > 0) ? 2 : 3);
+    int a = fork();
+    int b = fork();
+    int client_id = (a > 0) ? ((b > 0) ? 0 : 1) : ((b > 0) ? 2 : 3);
 
     // initialize RPCs for each client
     rpc_conn_t rpc;
     RPC_init(&rpc, client_id, 20000 + client_id, config);
     
     char* msg = malloc(BUFFER_SIZE); 
-    sprintf(msg, "hello from client %i", client_id);
+    sprintf(msg, "hello from client %i\n", client_id);
     
     char* buffer = malloc(BUFFER_SIZE);
 
@@ -85,13 +85,22 @@ int main(int argc, char* argv[]) {
         //RPC_release_lock(&rpc); // release the lock
     }
     RPC_release_lock(&rpc);
+    printf("here we think that the transaction is already committed, %i\n", client_id);
     // close RPC connections
     RPC_close(&rpc);
 
     // wait for all children clients to finish writing
+    int status;
+    if(a > 0) {
+	waitpid(a, &status, 0);
+    }
+
+    if(b > 0) {
+	waitpid(b, &status, 0);
+    }
 
     // if we are the original process, kill the server and exit
-    if(1) {
+    if(a > 0 && b > 0) {
 	while(1) {}
 	for(int i = 0; i < N_SERVERS; ++i) {
 	    kill(server_pid[i], SIGKILL);

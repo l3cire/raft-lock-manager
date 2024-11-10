@@ -37,14 +37,21 @@ int handle_lock_acquire(int client_id, char* message) {
 }
 
 int handle_lock_release(int client_id, char* message) {
-    print_transaction();
+    int entry_id = current_log_entry.id;
     Raft_append_entry(&raft, &current_log_entry); 
     if(tmdspinlock_release(&lock, client_id) < 0) {
 	strcpy(message, "lock released before being acquired");
 	return E_LOCK_EXP;
     }
-    strcpy(message, "lock released");
-    return 0;
+    int rc = 0;
+    while(rc == 0) rc = Raft_is_entry_committed(&raft, raft.current_term, entry_id);
+    if(rc == 1) {
+	strcpy(message, "lock released");
+	return 0;
+    } else {
+	strcpy(message, "transaction lost");
+	return E_LOST;
+    }
 }
 
 int handle_append_file(int client_id, char* filename, char* buffer, char* message) {
