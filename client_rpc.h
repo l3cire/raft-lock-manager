@@ -24,6 +24,9 @@ typedef struct rpc_conn {
 //This function should set up a socket and bind it to src_port
 void RPC_init(rpc_conn_t *rpc, int id, int src_port, raft_configuration_t raft_config); 
 
+void RPC_restore(rpc_conn_t *rpc, char filename[128], int id, int src_port); 
+
+
 int RPC_acquire_lock(rpc_conn_t *rpc);
 
 int RPC_release_lock(rpc_conn_t *rpc);

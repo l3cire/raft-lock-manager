@@ -80,7 +80,12 @@ int Raft_is_entry_committed(raft_state_t *raft, int term, int id) {
     return 0;
 }
 
-
+void Raft_save_state(raft_state_t *raft) {
+    FILE *f = fopen(raft->state_filename, "wb");
+    fwrite(raft, sizeof(raft_state_t), 1, f);
+    fflush(f);
+    fclose(f);
+}
 
 void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     for(int i = raft->commit_index + 1; i <= new_commit_index; ++i) {
@@ -90,7 +95,7 @@ void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     raft->commit_index = new_commit_index;
 }
 
-void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_commit_handler commit_handler, int id, int port) {
+void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char state_file[256], raft_commit_handler commit_handler, int id, int port) {
     raft->id = id;
 
     raft->rpc_sd = UDP_Open(port);
@@ -108,6 +113,35 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_comm
     raft->log_count = 0;
     raft->last_applied_index = -1;
     raft->nvoted = 0;
+    strcpy(raft->state_filename, state_file);
+
+}
+
+void Raft_server_restore(raft_state_t *raft, char state_file[256], raft_commit_handler commit_handler, int id, int port) {
+    FILE *f = fopen(state_file, "rb");
+    fread(raft, sizeof(raft_state_t), 1, f);
+    fclose(f);
+
+
+    assert(raft->id == id);
+
+    raft->rpc_sd = UDP_Open(port);
+    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + 10*id); // election timeout will depend on a process;
+    raft->commit_handler = commit_handler;
+    raft->state = FOLLOWER;
+
+    spinlock_init(&raft->lock);
+    
+    int prev_session_commit_index = raft->commit_index;
+    raft->commit_index = -1;
+    raft->last_applied_index = -1;
+    raft->nvoted = 0;
+    strcpy(raft->state_filename, state_file);
+
+    spinlock_acquire(&raft->lock);
+    Raft_commit_update(raft, prev_session_commit_index);
+    spinlock_release(&raft->lock);
+
 }
 
 void* handle_raft_packet(void* arg);
@@ -150,6 +184,7 @@ int Raft_append_entry(raft_state_t *raft, raft_log_entry_t *log) {
     log->n_servers_replicated = 1;
     log->type = CLIENT_LOG;
     memcpy(Raft_get_log(raft, raft->log_count-1), log, sizeof(raft_log_entry_t));
+    Raft_save_state(raft);
 
     spinlock_release(&raft->lock);
     return 0;
@@ -162,6 +197,7 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     raft->voted_for = raft->id;
     raft->state = CANDIDATE;
     raft->nvoted = 1;
+    Raft_save_state(raft);
     
     raft_packet_t packet;
     bzero(&packet, sizeof(packet));
@@ -237,6 +273,7 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     log->term = raft->current_term;
     log->n_servers_replicated = 1;
     log->type = LEADER_LOG;
+    Raft_save_state(raft);
 
     
     for(int i = 0; i <= MAX_SERVER_ID; ++i) {
@@ -275,6 +312,7 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
     if(raft->current_term < response->term) {
 	//printf("(%i) GOT BEHIND, SWITCHING TO FOLLOWER\n", raft->current_term);
 	Raft_term_update(raft, response->term);
+	Raft_save_state(raft);
 	spinlock_release(&raft->lock);
 	return;
     }
@@ -305,6 +343,7 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 	    raft->next_index[response->id] ++;
 	}
 	raft->last_request_id[response->id] ++;
+	Raft_save_state(raft);
     }
 
     spinlock_release(&raft->lock);
@@ -316,6 +355,7 @@ void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft
     //printf("	[%i -> %i] request vote\n", vote_r->candidate_id, raft->id);
     if(raft->current_term < vote_r->term) {
 	Raft_term_update(raft, vote_r->term);
+	Raft_save_state(raft);
     }
 
     raft_packet_t packet;
@@ -336,6 +376,7 @@ void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft
 	    packet.data.response.success = 1;
 	    raft->voted_for = vote_r->candidate_id;
 	}
+	Raft_save_state(raft);
     }
 
     UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
@@ -386,6 +427,7 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
     } 
 
     //Raft_print_state(raft);
+    Raft_save_state(raft);
     
     UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
 

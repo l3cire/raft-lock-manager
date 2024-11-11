@@ -6,7 +6,7 @@
 #include "packet_format.h"
 
 #define __RAFT_h__
-#define LOG_SIZE 1000
+#define LOG_SIZE 100
 #define N_SERVERS 5 
 #define MAX_SERVER_ID 10
 #define MAX_TRANSACTION_ENTRIES 10
@@ -120,6 +120,8 @@ typedef struct raft_packet {
 	} data;
 } raft_packet_t;
 
+
+void Raft_server_restore(raft_state_t *raft, char state_filename[256], raft_commit_handler commit_handler, int id, int port);
 
 void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char state_filename[256], raft_commit_handler commit_handler, int id, int port);
 

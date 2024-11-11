@@ -65,6 +65,16 @@ void RPC_init(rpc_conn_t *rpc, int id, int src_port, raft_configuration_t raft_c
     } 
 }
 
+void RPC_restore(rpc_conn_t *rpc, char *filename, int id, int src_port) {
+    FILE *f = fopen(filename, "rb");
+    fread(rpc, sizeof(rpc_conn_t), 1, f);
+    fclose(f);
+
+    rpc->sd = UDP_Open(src_port);
+    UDP_SetReceiveTimeout(rpc->sd, RPC_READ_TIEMOUT);
+    assert(rpc->client_id == id);
+}
+
 int RPC_acquire_lock(rpc_conn_t *rpc) {
     packet_info_t packet;
     bzero(&packet, PACKET_SIZE);

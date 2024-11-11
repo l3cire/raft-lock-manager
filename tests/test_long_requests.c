@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdbool.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
@@ -28,24 +27,27 @@ int main(int argc, char* argv[]) {
     fclose(file);
    */
 
-    raft_configuration_t config;
+    int use_backup = 0;
+    if(argc > 1 && strcmp(argv[1], "use-backup") == 0) { 
+	use_backup = 1;
+    } raft_configuration_t config;
     FILE *f = fopen("./raft_config", "rb");
     fread(&config, sizeof(raft_configuration_t), 1, f);
     fclose(f);
 
-
+    
 
    // fork server process
     int server_pid[N_SERVERS];
     for(int i = 0; i < N_SERVERS; ++i) {
 	server_pid[i] = fork();
 	if(server_pid[i] == 0) {
-	    if(i == 0) {
+	    if(0) {
 		exit(0);
 	    }
 	    char id_arg[2]; 
 	    sprintf(id_arg, "%i", i+1);
-	    char* args[] = {"./raft_config", id_arg, NULL};
+	    char* args[] = {"./raft_config", id_arg, use_backup ? "use-backup" : NULL, NULL};
 	    int rs = execv("./bin/server", args);
 	    printf("exec failed, result: %i\n", rs);
 	    exit(1);
@@ -60,11 +62,18 @@ int main(int argc, char* argv[]) {
     int a = fork();
     int b = fork();
     int client_id = (a > 0) ? ((b > 0) ? 0 : 1) : ((b > 0) ? 2 : 3);
+    
+    char client_data_filename[128];
+    sprintf(client_data_filename, "test_files/rpc_client_%i", client_id);
 
     // initialize RPCs for each client
     rpc_conn_t rpc;
-    RPC_init(&rpc, client_id, 20000 + client_id, config);
-    
+    if(use_backup) {
+	RPC_restore(&rpc, client_data_filename, client_id, 20000+client_id);	
+    } else {
+	RPC_init(&rpc, client_id, 20000 + client_id, config);
+    }
+
     char* msg = malloc(BUFFER_SIZE); 
     sprintf(msg, "hello from client %i\n", client_id);
     
@@ -91,6 +100,11 @@ int main(int argc, char* argv[]) {
     }
     // close RPC connections
     RPC_close(&rpc);
+
+    f = fopen(client_data_filename, "wb");
+    fwrite(&rpc, sizeof(rpc_conn_t), 1, f);
+    fflush(f);
+    fclose(f);
 
     // wait for all children clients to finish writing
     int status;

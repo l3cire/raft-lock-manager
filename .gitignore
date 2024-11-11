@@ -6,6 +6,7 @@ server_files_2/
 server_files_3/
 server_files_4/
 server_files_5/
+test_files/
 
 *.o
 *.obj
