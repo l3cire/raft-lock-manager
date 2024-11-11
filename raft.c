@@ -15,6 +15,9 @@ void Raft_print_state(raft_state_t *raft) {
     char state_str[256];
     sprintf(state_str, "%i(%i)	%i[", raft->id, raft->current_term, raft->start_log_index);
     for(int i = 0; i < raft->log_count - raft->start_log_index; ++i) {
+	if(raft->log[i].type == LEADER_LOG) {
+	    sprintf(state_str + strlen(state_str), "l");
+	}
 	sprintf(state_str + strlen(state_str), "%i(%i)", i + raft->start_log_index, raft->log[i].term);
 	if(i + raft->start_log_index <= raft->commit_index) {
 	    sprintf(state_str + strlen(state_str), "c");

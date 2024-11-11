@@ -23,7 +23,7 @@ typedef struct client_process_data {
 
 
 typedef int (*lock_acquire_handler)(int client_id, char* response_message);
-typedef int (*lock_release_handler)(int client_id, char* response_message);
+typedef int (*lock_release_handler)(int client_id, int transaction_term, int transaction_id, char* response_message);
 typedef int (*append_file_handler)(int client_id, char* filename, char* buffer, char* response_message);
 
 

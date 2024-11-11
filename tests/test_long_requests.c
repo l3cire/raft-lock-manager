@@ -78,14 +78,17 @@ int main(int argc, char* argv[]) {
 	sprintf(filename, "file_%i", i);
 	for(int j = 0; j < strlen(msg); ++j) { // write a message character by character
 	    buffer[0] = msg[j];
-	    RPC_append_file(&rpc, filename, buffer);
+	    if(RPC_append_file(&rpc, filename, buffer) < 0) break;
 	    //usleep(10000);
 	}
 
         //RPC_release_lock(&rpc); // release the lock
     }
-    RPC_release_lock(&rpc);
-    printf("here we think that the transaction is already committed, %i\n", client_id);
+    if(RPC_release_lock(&rpc) == 0) {
+	printf("transaction is committed, %i\n", client_id);
+    } else {
+	printf("transaction rejected\n");
+    }
     // close RPC connections
     RPC_close(&rpc);
 

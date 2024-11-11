@@ -52,7 +52,7 @@ void* handle_packet(void *arg) {
     response.vtime = packet->vtime;
 
     if(rpc->raft->state != LEADER) {
-	response.rc = E_SERVER;
+	response.rc = (rpc->raft->state == FOLLOWER) ? E_FOLLOWER : E_ELECTION;
 	sprintf(response.message, "this is not the leader server; address another one\n");
 	send_packet_response(rpc, addr, &response);
 	free(arg);
@@ -63,14 +63,14 @@ void* handle_packet(void *arg) {
     spinlock_acquire(&rpc->client_table_lock);
     if(rpc->client_table[packet->client_id] == 0) {
 	// if client not initialized and the operation is not init, return an error
-	if(packet->operation != CLIENT_INIT) {
+	/*if(packet->operation != CLIENT_INIT) {
 	    spinlock_release(&rpc->client_table_lock);
 	    response.rc = E_NO_CLIENT;
 	    sprintf(response.message, "client not initialized");
 	    send_packet_response(rpc, addr, &response);
 	    free(arg);
 	    pthread_exit(0);
-	}
+	}*/
 	rpc->client_table[packet->client_id] = malloc(sizeof(client_process_data_t));
 	rpc->client_table[packet->client_id]->id = packet->client_id;
 	rpc->client_table[packet->client_id]->vtime = -1;
@@ -106,9 +106,12 @@ void* handle_packet(void *arg) {
 	case LOCK_ACQUIRE:
 	    response.rc = rpc->handle_lock_acquire(packet->client_id, response.message);
 	    break;
-	case LOCK_RELEASE:
-	    response.rc = rpc->handle_lock_release(packet->client_id, response.message);
+	case LOCK_RELEASE: {
+	    int transaction_data[2];
+	    memcpy(transaction_data, packet->buffer, 2*sizeof(int));
+	    response.rc = rpc->handle_lock_release(packet->client_id, transaction_data[0], transaction_data[1], response.message);
 	    break;
+	}
 	case APPEND_FILE:
 	    response.rc = rpc->handle_append_file(packet->client_id, packet->file_name, packet->buffer, response.message);
 	    break;

@@ -32,23 +32,37 @@ int handle_lock_acquire(int client_id, char* message) {
     bzero(current_log_entry.data, sizeof(raft_transaction_entry_t)*MAX_TRANSACTION_ENTRIES);
     current_log_entry.client = client_id;
     current_log_entry.id++;
-    strcpy(message, "lock acquired");
+    int log_data[2] = {raft.current_term, current_log_entry.id};
+    memcpy(message, log_data, 2*sizeof(int));
     return 0;
 }
 
-int handle_lock_release(int client_id, char* message) {
-    int entry_id = current_log_entry.id;
-    Raft_append_entry(&raft, &current_log_entry); 
-    if(tmdspinlock_release(&lock, client_id) < 0) {
-	strcpy(message, "lock released before being acquired");
-	return E_LOCK_EXP;
+int handle_lock_release(int client_id, int transaction_term, int transaction_id, char* message) {
+    if(transaction_term == raft.current_term) {
+	// if the transaction is from our term, we need to add it to the log ans release the lock
+	if(tmdspinlock_pause_if_owner(&lock, client_id) == 0) {
+	    Raft_append_entry(&raft, &current_log_entry); 
+	    tmdspinlock_reset_if_owner(&lock, client_id);
+	}
+	if(tmdspinlock_release(&lock, client_id) < 0) {
+	    strcpy(message, "lock released before being acquired");
+	    return E_LOCK_EXP;
+	}
+    } else {
+	printf("getting a request for release() of a previous term %i for client %i\n", transaction_term, client_id);
     }
+
     int rc = 0;
-    while(rc == 0) rc = Raft_is_entry_committed(&raft, raft.current_term, entry_id);
+    while(rc == 0) {
+	rc = Raft_is_entry_committed(&raft, transaction_term, transaction_id);
+	sched_yield();
+    }
+
     if(rc == 1) {
 	strcpy(message, "lock released");
 	return 0;
     } else {
+	printf("TRANSACTION LOSS for client %i\n", client_id);
 	strcpy(message, "transaction lost");
 	return E_LOST;
     }
@@ -85,7 +99,6 @@ int handle_append_file(int client_id, char* filename, char* buffer, char* messag
 }
 
 void handle_raft_commit(raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) {
-    printf("raft server %i committing transaction\n", raft.id);
     for(int i = 0; i < MAX_TRANSACTION_ENTRIES; ++i) {
 	char* filename = data[i].filename;
 	char* buffer = data[i].buffer;
@@ -97,6 +110,7 @@ void handle_raft_commit(raft_transaction_entry_t data[MAX_TRANSACTION_ENTRIES]) 
 	FILE *f = fopen(fn, "a");
 	if(!f) continue;
 	fprintf(f, "%s", buffer);
+	fflush(f);
 	fclose(f);
     }
 }
