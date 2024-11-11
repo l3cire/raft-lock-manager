@@ -55,6 +55,7 @@ typedef struct raft_state {
 	raft_log_entry_t log[LOG_SIZE];
 	int start_log_index;
 	int log_count;
+	char state_filename[256];
 
 	// volatile state on all servers
 	enum node_state {
@@ -120,7 +121,7 @@ typedef struct raft_packet {
 } raft_packet_t;
 
 
-void Raft_server_init(raft_state_t *raft, raft_configuration_t config, raft_commit_handler commit_handler, int id, int port);
+void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char state_filename[256], raft_commit_handler commit_handler, int id, int port);
 
 void Raft_RPC_listen(raft_state_t *raft);
 
