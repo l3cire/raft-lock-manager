@@ -10,6 +10,7 @@
 #define N_SERVERS 5 
 #define MAX_SERVER_ID 10
 #define MAX_TRANSACTION_ENTRIES 10
+#define COMMITS_TO_SNAPSHOT 10
 
 #define ELECTION_TIMEOUT 1000
 #define HEARTBIT_TIME 300
@@ -55,7 +56,7 @@ typedef struct raft_state {
 	raft_log_entry_t log[LOG_SIZE];
 	int start_log_index;
 	int log_count;
-	char state_filename[256];
+	char files_dir[256];
 
 	// volatile state on all servers
 	enum node_state {
@@ -68,6 +69,7 @@ typedef struct raft_state {
 	raft_commit_handler commit_handler;
 	int commit_index;
 	int last_applied_index;
+	int snapshot_in_progress;
 
 	// volatile state on candidates (initialized at the start of an election)
 	int nvoted;
@@ -121,9 +123,9 @@ typedef struct raft_packet {
 } raft_packet_t;
 
 
-void Raft_server_restore(raft_state_t *raft, char state_filename[256], raft_commit_handler commit_handler, int id, int port);
+void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_handler commit_handler, int id, int port);
 
-void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char state_filename[256], raft_commit_handler commit_handler, int id, int port);
+void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char filedir[256], raft_commit_handler commit_handler, int id, int port);
 
 void Raft_RPC_listen(raft_state_t *raft);
 

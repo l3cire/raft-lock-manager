@@ -3,6 +3,7 @@
 #include "spinlock.h"
 #include "udp.h"
 #include <time.h>
+#include <sys/stat.h>
 #include <errno.h>
 
 typedef struct raft_thread_arg {
@@ -81,7 +82,10 @@ int Raft_is_entry_committed(raft_state_t *raft, int term, int id) {
 }
 
 void Raft_save_state(raft_state_t *raft) {
-    FILE *f = fopen(raft->state_filename, "wb");
+    char raft_file[256];
+    strcpy(raft_file, raft->files_dir);
+    strcat(raft_file, "raft_state");
+    FILE *f = fopen(raft_file, "wb");
     fwrite(raft, sizeof(raft_state_t), 1, f);
     fflush(f);
     fclose(f);
@@ -95,7 +99,7 @@ void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     raft->commit_index = new_commit_index;
 }
 
-void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char state_file[256], raft_commit_handler commit_handler, int id, int port) {
+void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char filedir[256], raft_commit_handler commit_handler, int id, int port) {
     raft->id = id;
 
     raft->rpc_sd = UDP_Open(port);
@@ -108,17 +112,21 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char stat
     raft->voted_for = -1;
     raft->start_log_index = 0;
     raft->current_term = 0;
+    raft->snapshot_in_progress = 0;
     
     raft->commit_index = -1;
     raft->log_count = 0;
     raft->last_applied_index = -1;
     raft->nvoted = 0;
-    strcpy(raft->state_filename, state_file);
+    strcpy(raft->files_dir, filedir);
 
 }
 
-void Raft_server_restore(raft_state_t *raft, char state_file[256], raft_commit_handler commit_handler, int id, int port) {
-    FILE *f = fopen(state_file, "rb");
+void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_handler commit_handler, int id, int port) {
+    char raft_file[256];
+    strcpy(raft_file, filedir);
+    strcat(raft_file, "raft_state");
+    FILE *f = fopen(raft_file, "rb");
     fread(raft, sizeof(raft_state_t), 1, f);
     fclose(f);
 
@@ -129,20 +137,66 @@ void Raft_server_restore(raft_state_t *raft, char state_file[256], raft_commit_h
     UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + 10*id); // election timeout will depend on a process;
     raft->commit_handler = commit_handler;
     raft->state = FOLLOWER;
+    raft->snapshot_in_progress = 0;
 
     spinlock_init(&raft->lock);
     
     int prev_session_commit_index = raft->commit_index;
-    raft->commit_index = -1;
+    raft->commit_index = raft->start_log_index - 1;
     raft->last_applied_index = -1;
     raft->nvoted = 0;
-    strcpy(raft->state_filename, state_file);
+    strcpy(raft->files_dir, filedir);
 
     spinlock_acquire(&raft->lock);
     Raft_commit_update(raft, prev_session_commit_index);
     spinlock_release(&raft->lock);
 
 }
+
+
+int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
+    spinlock_acquire(&raft->lock);
+    if(raft->snapshot_in_progress || new_log_start <= raft->start_log_index || new_log_start > raft->commit_index + 1) {
+	spinlock_release(&raft->lock);
+	return -1;
+    }
+    raft->snapshot_in_progress = 1;
+    spinlock_release(&raft->lock);
+    char dir[256];
+    sprintf(dir, "%s", raft->files_dir);
+    sprintf(dir + strlen(dir), "snapshot_%i/", new_log_start);
+    mode_t mod = 0777;
+    mkdir(dir, mod);
+    for(int i = raft->start_log_index; i < new_log_start; ++i) {
+	raft_log_entry_t *log = Raft_get_log(raft, i);
+	if(log->type == LEADER_LOG) continue;
+	for(int j = 0; j < MAX_TRANSACTION_ENTRIES; ++j) {
+	    if(log->data[j].filename[0] == 0) break;
+
+	    char filename[256];
+	    sprintf(filename, "%s", raft->files_dir);
+	    sprintf(filename + strlen(filename), "snapshot_%i/", new_log_start);
+	    sprintf(filename + strlen(filename), "%s", log->data[j].filename);
+
+	    FILE *f = fopen(filename, "a+");
+	    fprintf(f, "%s", log->data[j].buffer);
+	    fflush(f);
+	    fclose(f);
+	}
+    }
+
+    spinlock_acquire(&raft->lock);
+    raft->snapshot_in_progress = 0;
+    for(int i = new_log_start; i < raft->log_count; ++i) {
+	raft->log[i - new_log_start] = raft->log[i - raft->start_log_index];
+    }
+    raft->start_log_index = new_log_start;
+    Raft_save_state(raft);
+
+    spinlock_release(&raft->lock);
+    return 0;
+}
+
 
 void* handle_raft_packet(void* arg);
 void* election_thread(void* arg);
@@ -249,6 +303,10 @@ void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct 
     packet.data.append_r.prev_log_index = next_ind - 1;
     packet.data.append_r.prev_log_term = Raft_get_log_term(raft, next_ind - 1); 
     packet.data.append_r.request_id = raft->last_request_id[follower_id];
+    if(next_ind < raft->start_log_index) {
+	printf("TRYING TO GET A SNAPSHOTTED LOG ENTRY: %i\n", next_ind);
+	exit(1);
+    }
     if(next_ind == raft->log_count) {
 	packet.data.append_r.entries_n = 0;
 	//printf("(%i) sending heartbeat to %i\n", raft->id, follower_id);
@@ -451,6 +509,9 @@ void* handle_raft_packet(void* arg) {
 	    break;
     }
 
+    if(raft->commit_index - raft->start_log_index + 1 >= COMMITS_TO_SNAPSHOT) {
+	Raft_create_snapshot(raft, raft->commit_index - 2);
+    }
 
     free(arg);
     pthread_exit(0);

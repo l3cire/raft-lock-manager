@@ -148,13 +148,10 @@ int main(int argc, char *argv[]) {
 	printf("    server %i, client_port = %i, raft_port = %i, files_dir= %s \n", config.servers[i].id, ntohs(config.servers[i].client_socket.sin_port), ntohs(config.servers[i].raft_socket.sin_port), config.servers[i].file_directory);
     }
 */
-    char raft_state_filename[256];
-    strcpy(raft_state_filename, files_dir);
-    strcat(raft_state_filename, "raft_state");
     if(use_backup) {
-	Raft_server_restore(&raft, raft_state_filename, handle_raft_commit, id, port_raft); 
+	Raft_server_restore(&raft, files_dir, handle_raft_commit, id, port_raft); 
     } else {
-	Raft_server_init(&raft, config, raft_state_filename, handle_raft_commit, id, port_raft);
+	Raft_server_init(&raft, config, files_dir, handle_raft_commit, id, port_raft);
     }
     pthread_t tid;
     pthread_create(&tid, NULL, raft_listener_thread, NULL);
