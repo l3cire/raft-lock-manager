@@ -49,7 +49,10 @@ $(OBJ_TEST): $(BUILD_DIR)/%.o : $(TEST_DIR)/%.c
 
 
 clean_files:
-	find $(FILES_DIR) -type f -not -name "raft_state" -exec cp /dev/null {} \;
+	find $(FILES_DIR) -type f -maxdepth 1 -not -name "raft_state" -exec cp /dev/null {} \;
+
+clean_snapshots:
+	find $(FILES_DIR) -mindepth 1 -maxdepth 1 -type d -exec rm -R {} +
 
 clean: clean_files
 	rm -f $(BUILD_DIR)/* $(BIN_DIR)/*

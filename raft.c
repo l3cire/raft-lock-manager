@@ -99,6 +99,102 @@ void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     raft->commit_index = new_commit_index;
 }
 
+void raft_copy_files(char dir1[256], char dir2[256]) {
+    int dir1_len = strlen(dir1);
+    int dir2_len = strlen(dir2);
+    for(int file_ind = 0; file_ind < 100; ++file_ind) {
+	sprintf(dir1 + dir1_len, "file_%i", file_ind);
+    	FILE *f1 = fopen(dir1, "r");
+	if(f1 == NULL) continue;
+
+	sprintf(dir2 + dir2_len, "file_%i", file_ind);
+	FILE *f2 = fopen(dir2, "w");
+
+	int a;
+	while((a = fgetc(f1)) != EOF) {
+	    fputc(a, f2);
+	}
+	fclose(f1);
+	fclose(f2);
+    }
+}
+
+void raft_remove_snapshot(char path[256]){
+    for(int file_ind = 0; file_ind < 100; ++file_ind) {
+	char filename[256];
+	strcpy(filename, path);
+	sprintf(filename + strlen(filename), "file_%i", file_ind);
+	remove(filename);
+    }
+    rmdir(path);
+}
+
+int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
+    spinlock_acquire(&raft->lock);
+    if(raft->snapshot_in_progress || new_log_start <= raft->start_log_index || new_log_start > raft->commit_index + 1) {
+	spinlock_release(&raft->lock);
+	return -1;
+    }
+    raft->snapshot_in_progress = 1; // set the flag that the snapshot is in progress
+    spinlock_release(&raft->lock);
+
+    char dir[256];
+    sprintf(dir, "%s", raft->files_dir);
+    sprintf(dir + strlen(dir), "snapshot_%i/", new_log_start);
+    mode_t mod = 0777;
+    mkdir(dir, mod);
+
+    int prev_snap_id = raft->start_log_index;
+    if(raft->start_log_index != 0) {
+	char new_snap_dir[256];
+	strcpy(new_snap_dir, dir);
+
+	char prev_snap_dir[256];
+	sprintf(prev_snap_dir, "%s", raft->files_dir);
+	sprintf(prev_snap_dir + strlen(prev_snap_dir), "snapshot_%i/", raft->start_log_index);
+	
+	raft_copy_files(prev_snap_dir, new_snap_dir);
+    }
+
+
+    for(int i = raft->start_log_index; i < new_log_start; ++i) {
+	raft_log_entry_t *log = Raft_get_log(raft, i);
+	if(log->type == LEADER_LOG) continue;
+	for(int j = 0; j < MAX_TRANSACTION_ENTRIES; ++j) {
+	    if(log->data[j].filename[0] == 0) break;
+
+	    char filename[256];
+	    sprintf(filename, "%s", raft->files_dir);
+	    sprintf(filename + strlen(filename), "snapshot_%i/", new_log_start);
+	    sprintf(filename + strlen(filename), "%s", log->data[j].filename);
+
+	    FILE *f = fopen(filename, "a+");
+	    fprintf(f, "%s", log->data[j].buffer);
+	    fflush(f);
+	    fclose(f);
+	}
+    }
+
+    spinlock_acquire(&raft->lock);
+    raft->snapshot_in_progress = 0;
+    for(int i = new_log_start; i < raft->log_count; ++i) {
+	raft->log[i - new_log_start] = raft->log[i - raft->start_log_index];
+    }
+    raft->start_log_index = new_log_start;
+    Raft_save_state(raft);
+
+    spinlock_release(&raft->lock);
+
+    if(prev_snap_id != 0) {
+	char prev_snap_path[256];
+	strcpy(prev_snap_path, raft->files_dir);
+	sprintf(prev_snap_path + strlen(prev_snap_path), "snapshot_%i/", prev_snap_id);
+	raft_remove_snapshot(prev_snap_path);
+    }
+    
+    return 0;
+}
+
 void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char filedir[256], raft_commit_handler commit_handler, int id, int port) {
     raft->id = id;
 
@@ -147,54 +243,17 @@ void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_hand
     raft->nvoted = 0;
     strcpy(raft->files_dir, filedir);
 
-    spinlock_acquire(&raft->lock);
+    if(raft->start_log_index != 0) {
+	char snapshot_dir[256];
+	sprintf(snapshot_dir, "%s", filedir);
+	sprintf(snapshot_dir + strlen(snapshot_dir), "snapshot_%i/", raft->start_log_index);
+
+	char main_dir[256];
+	sprintf(main_dir, "%s", filedir);
+
+	raft_copy_files(snapshot_dir, main_dir);
+    }
     Raft_commit_update(raft, prev_session_commit_index);
-    spinlock_release(&raft->lock);
-
-}
-
-
-int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
-    spinlock_acquire(&raft->lock);
-    if(raft->snapshot_in_progress || new_log_start <= raft->start_log_index || new_log_start > raft->commit_index + 1) {
-	spinlock_release(&raft->lock);
-	return -1;
-    }
-    raft->snapshot_in_progress = 1;
-    spinlock_release(&raft->lock);
-    char dir[256];
-    sprintf(dir, "%s", raft->files_dir);
-    sprintf(dir + strlen(dir), "snapshot_%i/", new_log_start);
-    mode_t mod = 0777;
-    mkdir(dir, mod);
-    for(int i = raft->start_log_index; i < new_log_start; ++i) {
-	raft_log_entry_t *log = Raft_get_log(raft, i);
-	if(log->type == LEADER_LOG) continue;
-	for(int j = 0; j < MAX_TRANSACTION_ENTRIES; ++j) {
-	    if(log->data[j].filename[0] == 0) break;
-
-	    char filename[256];
-	    sprintf(filename, "%s", raft->files_dir);
-	    sprintf(filename + strlen(filename), "snapshot_%i/", new_log_start);
-	    sprintf(filename + strlen(filename), "%s", log->data[j].filename);
-
-	    FILE *f = fopen(filename, "a+");
-	    fprintf(f, "%s", log->data[j].buffer);
-	    fflush(f);
-	    fclose(f);
-	}
-    }
-
-    spinlock_acquire(&raft->lock);
-    raft->snapshot_in_progress = 0;
-    for(int i = new_log_start; i < raft->log_count; ++i) {
-	raft->log[i - new_log_start] = raft->log[i - raft->start_log_index];
-    }
-    raft->start_log_index = new_log_start;
-    Raft_save_state(raft);
-
-    spinlock_release(&raft->lock);
-    return 0;
 }
 
 
