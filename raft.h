@@ -71,8 +71,12 @@ typedef struct raft_state {
 	int last_applied_index;
 	int snapshot_in_progress;
 
+	int install_snapshot_index;
+	int install_snapshot_id;
+
 	// volatile state on candidates (initialized at the start of an election)
 	int nvoted;
+	int nblocked;
 
 	// volatile state on leaders (initialized after an election)
 	int next_index[MAX_SERVER_ID+1];
@@ -98,10 +102,23 @@ typedef struct raft_vote_request {
 	int last_log_term;
 } raft_vote_request_t;
 
+typedef struct raft_install_snapshot_request {
+	int term;
+	int leader_id;
+	int snapshot_id;
+	int index;
+	int done;
+	int request_id;
+
+	char filename[256];
+	char buffer[BUFFER_SIZE];
+} raft_install_snapshot_request_t;
+
 
 typedef enum request_type {
 	APPEND,
 	VOTE,
+	INSTALL_SNAPSHOT,
 	RESPONSE
 } request_type_t;
 
@@ -118,6 +135,7 @@ typedef struct raft_packet {
 	union data {
 		raft_append_request_t append_r;
 		raft_vote_request_t vote_r;
+		raft_install_snapshot_request_t install_r;
 		raft_response_packet_t response;
 	} data;
 } raft_packet_t;

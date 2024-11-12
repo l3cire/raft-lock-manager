@@ -1,7 +1,9 @@
 #include "raft.h"
+#include "packet_format.h"
 #include "pthread.h"
 #include "spinlock.h"
 #include "udp.h"
+#include <stdlib.h>
 #include <time.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -11,6 +13,11 @@ typedef struct raft_thread_arg {
     raft_packet_t packet;
     struct sockaddr_in addr; } raft_thread_arg_t;
 
+typedef struct raft_leader_thread_arg {
+    raft_state_t* raft;
+    int follower_id;
+    struct sockaddr_in addr;
+} raft_leader_thread_arg_t;
 
 void Raft_print_state(raft_state_t *raft) {
     char state_str[256];
@@ -32,11 +39,23 @@ void Raft_print_state(raft_state_t *raft) {
 }
 
 
+void raft_remove_snapshot(char path[256]);
 void Raft_term_update(raft_state_t *raft, int new_term) {
     raft->current_term = new_term;
     raft->nvoted = 0;
+    raft->nblocked = 0;
     raft->voted_for = -1;
     raft->state = FOLLOWER;
+
+    if(raft->install_snapshot_id != -1) {
+	char path[256];
+	sprintf(path, "%s", raft->files_dir);
+	sprintf(path + strlen(path), "snapshot_%i/", raft->install_snapshot_id);
+	raft_remove_snapshot(path);
+
+	raft->install_snapshot_id = -1;
+	raft->install_snapshot_index = -1;
+    }
 }
 
 raft_log_entry_t* Raft_get_log(raft_state_t *raft, int abs_index) {
@@ -199,7 +218,8 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char file
     raft->id = id;
 
     raft->rpc_sd = UDP_Open(port);
-    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + 10*id); // election timeout will depend on a process;
+    srand(time(0));
+    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT +  (rand() % 100)); // election timeout will depend on a process;
     raft->commit_handler = commit_handler;
 
     raft->config = config;
@@ -214,7 +234,11 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char file
     raft->log_count = 0;
     raft->last_applied_index = -1;
     raft->nvoted = 0;
+    raft->nblocked = 0;
     strcpy(raft->files_dir, filedir);
+
+    raft->install_snapshot_id = -1;
+    raft->install_snapshot_index = -1;
 
 }
 
@@ -230,7 +254,8 @@ void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_hand
     assert(raft->id == id);
 
     raft->rpc_sd = UDP_Open(port);
-    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + 10*id); // election timeout will depend on a process;
+    srand(time(0));
+    UDP_SetReceiveTimeout(raft->rpc_sd, ELECTION_TIMEOUT + (rand() % 100)); // election timeout will depend on a process;
     raft->commit_handler = commit_handler;
     raft->state = FOLLOWER;
     raft->snapshot_in_progress = 0;
@@ -241,7 +266,11 @@ void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_hand
     raft->commit_index = raft->start_log_index - 1;
     raft->last_applied_index = -1;
     raft->nvoted = 0;
+    raft->nblocked = 0;
     strcpy(raft->files_dir, filedir);
+
+    raft->install_snapshot_id = -1;
+    raft->install_snapshot_index = -1;
 
     if(raft->start_log_index != 0) {
 	char snapshot_dir[256];
@@ -270,8 +299,8 @@ void Raft_RPC_listen(raft_state_t *raft) {
 	arg->raft = raft;
 	int rc = UDP_Read(raft->rpc_sd, &arg->addr, (char*)&arg->packet, sizeof(raft_packet_t));
 	if(rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN) && raft->state == FOLLOWER) {
-	    spinlock_acquire(&raft->lock);
 	    //printf("(%i[%i]) follower timeout -- starting election\n", raft->id, raft->current_term);
+	    spinlock_acquire(&raft->lock);
 	    free(arg);
 	    pthread_create(&req_thread_id, NULL, election_thread, raft);
 	    pthread_detach(req_thread_id);
@@ -310,6 +339,7 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     raft->voted_for = raft->id;
     raft->state = CANDIDATE;
     raft->nvoted = 1;
+    raft->nblocked = 0;
     Raft_save_state(raft);
     
     raft_packet_t packet;
@@ -329,6 +359,7 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
 
     clock_t election_start = clock();
     //printf("(%i[%i]) about to start loop\n", raft->id, raft->current_term);
+    int timeout = ELECTION_TIMEOUT + (rand() % 100);
     while(1) {
 	////printf("once more here %i\n", raft->id);
 	spinlock_acquire(&raft->lock);
@@ -341,7 +372,7 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
 	clock_t time_diff = clock() - election_start;
 	int time_diff_msec = time_diff * 1000 / CLOCKS_PER_SEC;
 	////printf("here (%i)\n", raft->id);
-	if(time_diff_msec > ELECTION_TIMEOUT + 10*raft->id) {
+	if(time_diff_msec > timeout && raft->nblocked*2 < N_SERVERS) {
 	    //printf("(%i[%i]) vote timeout -- restarting election\n", raft->id, raft->current_term);
 	    return -1;
 	}
@@ -350,6 +381,76 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     }
 }
 
+
+void Raft_send_snapshot(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
+    //wait for all snapshots to finish
+    while(raft->snapshot_in_progress) {
+	spinlock_release(&raft->lock);
+	sched_yield();
+	spinlock_acquire(&raft->lock);
+    }
+
+    raft->snapshot_in_progress = 1; // set snapshot flag so that no snapshots are created
+
+    int id = raft->start_log_index;
+    int ind = 0;
+
+    raft_packet_t packet;
+    packet.request_type = INSTALL_SNAPSHOT;
+    packet.data.install_r.snapshot_id = id;
+    packet.data.install_r.term = raft->current_term;
+    packet.data.install_r.leader_id = raft->id;
+
+    for(int fileno = 0; fileno < 100; ++fileno) {
+	char fn[256];
+	strcpy(fn, raft->files_dir);
+	sprintf(fn + strlen(fn), "snapshot_%i/file_%i", id, fileno);
+
+	FILE *f = fopen(fn, "rb");
+	if(f == NULL) continue;
+
+	sprintf(packet.data.install_r.filename, "file_%i", fileno);
+
+	while(1) {
+	    bzero(packet.data.install_r.buffer, BUFFER_SIZE);
+	    int nread = fread(packet.data.install_r.buffer, sizeof(char), BUFFER_SIZE, f);
+	    
+	    packet.data.install_r.index = ind;
+	    ind++;
+	    
+	    packet.data.install_r.request_id = raft->last_request_id[follower_id];
+	    packet.data.install_r.done = 0;
+
+	    while(packet.data.install_r.request_id == raft->last_request_id[follower_id]) {
+		UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
+		spinlock_release(&raft->lock);
+		usleep(HEARTBIT_TIME*1000);
+		spinlock_acquire(&raft->lock);
+	    }
+
+	    if(nread < BUFFER_SIZE) break;
+	}
+
+	fclose(f);
+    }
+    
+    packet.data.install_r.done = 1;
+    packet.data.install_r.request_id = raft->last_request_id[follower_id];
+    packet.data.install_r.index = ind;
+
+    while(packet.data.install_r.request_id == raft->last_request_id[follower_id]) {
+	UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
+	spinlock_release(&raft->lock);
+	usleep(HEARTBIT_TIME*1000);
+	spinlock_acquire(&raft->lock);
+    }
+
+    raft->next_index[follower_id] = raft->start_log_index;
+    raft->match_index[follower_id] = raft->start_log_index - 1;
+    raft->snapshot_in_progress = 0;
+
+    printf("SUCCESSFULLY INSTALLED A SNAPSHOT\n");
+}
 
 void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
     raft_packet_t packet;
@@ -363,8 +464,9 @@ void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct 
     packet.data.append_r.prev_log_term = Raft_get_log_term(raft, next_ind - 1); 
     packet.data.append_r.request_id = raft->last_request_id[follower_id];
     if(next_ind < raft->start_log_index) {
-	printf("TRYING TO GET A SNAPSHOTTED LOG ENTRY: %i\n", next_ind);
-	exit(1);
+	printf("TRYING TO GET A SNAPSHOTTED LOG ENTRY: %i for server %i\n", next_ind, follower_id);
+	Raft_send_snapshot(raft, follower_id, addr);
+	return;
     }
     if(next_ind == raft->log_count) {
 	packet.data.append_r.entries_n = 0;
@@ -379,6 +481,27 @@ void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct 
     //printf("rc = %i = siseof = %i\n", rc, (int)sizeof(request));
 }
 
+void* Raft_leader_thread(void* arg) {
+    raft_state_t *raft = ((raft_leader_thread_arg_t*)arg)->raft;
+    int follower_id = ((raft_leader_thread_arg_t*)arg)->follower_id;
+    struct sockaddr_in *addr = &((raft_leader_thread_arg_t*)arg)->addr;
+
+    while(1) {
+	spinlock_acquire(&raft->lock);
+	if(raft->state != LEADER) {
+	    spinlock_release(&raft->lock);
+	    break;
+	}
+	Raft_send_append_entry_request(raft, follower_id, addr);
+	spinlock_release(&raft->lock);
+	usleep(HEARTBIT_TIME*1000);
+    }
+    
+    free(arg);
+    pthread_exit(0);
+}
+
+
 void Raft_convert_to_leader(raft_state_t *raft) {
     // the lock must be acquired here!!!!!!
     raft->state = LEADER;
@@ -390,7 +513,6 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     log->term = raft->current_term;
     log->n_servers_replicated = 1;
     log->type = LEADER_LOG;
-    Raft_save_state(raft);
 
     
     for(int i = 0; i <= MAX_SERVER_ID; ++i) {
@@ -402,19 +524,16 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     Raft_print_state(raft);
     printf("(%i[%i]) elected as leader\n", raft->id, raft->current_term);
 
-    while(1) {
-	if(raft->state != LEADER) {
-	    spinlock_release(&raft->lock);
-	    break;
-	}
-	for(int i = 0; i < N_SERVERS; ++i) {
-	    if(raft->config.servers[i].id == raft->id) continue;
-	    Raft_send_append_entry_request(raft, raft->config.servers[i].id, &raft->config.servers[i].raft_socket);
-	}
-	//printf("(%i[%i]) heartbeat\n", raft->id, raft->current_term);
-	spinlock_release(&raft->lock);
-	usleep(HEARTBIT_TIME * 1000);
-	spinlock_acquire(&raft->lock);
+    Raft_save_state(raft);
+
+    spinlock_release(&raft->lock);
+
+    for(int i = 0; i < N_SERVERS; ++i) {
+	if(raft->config.servers[i].id == raft->id) continue;
+	raft_leader_thread_arg_t *arg = malloc(sizeof(raft_leader_thread_arg_t));
+	arg->raft = raft; arg->follower_id = raft->config.servers[i].id; arg->addr = raft->config.servers[i].raft_socket;
+	pthread_t tid;
+	pthread_create(&tid, NULL, Raft_leader_thread, arg);
     }
 }
 
@@ -435,7 +554,8 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
     }
 
     if(raft->state == CANDIDATE) {
-	if(!response->success) {
+	if(response->success <= 0) {
+	    if(response->success == -1) raft->nblocked ++;
 	    spinlock_release(&raft->lock);
 	    return;
 	}
@@ -446,7 +566,12 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
 	    return;
 	}
     } else if(raft->state == LEADER && response->request_id == raft->last_request_id[response->id]) {
-	if(!response->success) {
+	if(raft->next_index[response->id] < raft->start_log_index) {
+	    if(!response->success) {
+		printf("fatal error installing snapshot\n");
+		exit(1);
+	    }
+	} else if(!response->success) {
 	    raft->next_index[response->id] --;
 	} else if(raft->next_index[response->id] < raft->log_count) {
 	    if(raft->next_index[response->id] > raft->commit_index &&
@@ -492,6 +617,8 @@ void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft
 	} else if(vote_r->last_log_term == last_log_term && vote_r->last_log_index >= last_log_index) {
 	    packet.data.response.success = 1;
 	    raft->voted_for = vote_r->candidate_id;
+	} else {
+	    packet.data.response.success = -1;
 	}
 	Raft_save_state(raft);
     }
@@ -524,11 +651,13 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
 	packet.data.response.success = 0;
 	//printf("    (%i) consistency check failed for prev_index = %i (term %i)\n", raft->id, append_r->prev_log_index, append_r->prev_log_term);
     } else if(append_r->entries_n == 0) { // this means we are consistent 
+	raft->state = FOLLOWER;
 	packet.data.response.success = 1;
 	if(append_r->leader_commit > raft->commit_index) {
 	    Raft_commit_update(raft, append_r->leader_commit);
 	}
     } else {
+	raft->state = FOLLOWER;
 	int index = append_r->prev_log_index + 1;
 	if(index < raft->log_count && Raft_get_log_term(raft, index) != append_r->entry.term) { // rewrite log entries contradicting with new one
 	    raft->log_count = index + 1;
@@ -551,6 +680,88 @@ void handle_raft_append_request(raft_state_t *raft, struct sockaddr_in *addr, ra
     spinlock_release(&raft->lock);
 }
 
+
+void handle_raft_install_snapshot_request(raft_state_t *raft, struct sockaddr_in *addr, raft_install_snapshot_request_t *install_r) {
+    spinlock_acquire(&raft->lock);
+
+    if(raft->current_term < install_r->term) {
+	Raft_term_update(raft, install_r->term);
+	Raft_save_state(raft);
+    }
+
+ 
+    raft_packet_t packet;
+    bzero(&packet, sizeof(raft_packet_t));
+    packet.request_type = RESPONSE;
+    packet.data.response.id = raft->id;
+    packet.data.response.term = raft->current_term;
+    packet.data.response.request_id = install_r->request_id;
+
+    int outdated_snapshot = 0;
+    
+    if(raft->current_term > install_r->term || 
+	(raft->install_snapshot_id != -1 && raft->install_snapshot_id != install_r->snapshot_id) || 
+	raft->install_snapshot_index + 1 != install_r->index) {
+	    packet.data.response.success = 0;
+    } else if(install_r->done) {
+	raft->snapshot_in_progress = 0;
+	outdated_snapshot = raft->start_log_index;
+	printf("outdated snapshot: %i\n", outdated_snapshot);
+	raft->start_log_index = install_r->snapshot_id;
+	raft->log_count = raft->start_log_index;
+	raft->commit_index = raft->start_log_index - 1;
+	raft->last_applied_index = raft->start_log_index - 1;
+
+	raft->install_snapshot_index = -1;
+	raft->install_snapshot_id = -1;
+	
+	char snapshot_dir[256];
+	sprintf(snapshot_dir, "%s", raft->files_dir);
+	sprintf(snapshot_dir + strlen(snapshot_dir), "snapshot_%i/", raft->start_log_index);
+
+	char main_dir[256];
+	sprintf(main_dir, "%s", raft->files_dir);
+
+	raft_copy_files(snapshot_dir, main_dir);
+	Raft_save_state(raft);
+
+	packet.data.response.success = 1;
+    } else {
+	raft->snapshot_in_progress = 1;
+
+	char dir[256];
+	strcpy(dir, raft->files_dir);
+	sprintf(dir + strlen(dir), "snapshot_%i/", install_r->snapshot_id);
+	if(raft->install_snapshot_id == -1) {
+	    raft->install_snapshot_id = install_r->snapshot_id;
+	    mode_t mod = 0777;
+	    mkdir(dir, mod);
+	}
+	
+	sprintf(dir + strlen(dir), "%s", install_r->filename);
+	FILE *f = fopen(dir, "a+");
+	fprintf(f, "%s", install_r->buffer);
+	fflush(f);
+	fclose(f);
+
+	raft->install_snapshot_index++;
+	Raft_save_state(raft);
+
+	packet.data.response.success = 1;
+    }
+    
+    UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));    
+
+    spinlock_release(&raft->lock);
+
+    if(outdated_snapshot != 0) {
+	char prev_snap_path[256];
+	strcpy(prev_snap_path, raft->files_dir);
+	sprintf(prev_snap_path + strlen(prev_snap_path), "snapshot_%i/", outdated_snapshot);
+	raft_remove_snapshot(prev_snap_path);
+    }
+}
+
 void* handle_raft_packet(void* arg) {
     raft_packet_t *packet = &((raft_thread_arg_t*)arg)->packet;
     struct sockaddr_in *addr = &((raft_thread_arg_t*)arg)->addr;
@@ -565,6 +776,9 @@ void* handle_raft_packet(void* arg) {
 	    break;
 	case APPEND:
 	    handle_raft_append_request(raft, addr, &packet->data.append_r);
+	    break;
+	case INSTALL_SNAPSHOT:
+	    handle_raft_install_snapshot_request(raft, addr, &packet->data.install_r);
 	    break;
     }
 

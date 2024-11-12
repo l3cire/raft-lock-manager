@@ -30,7 +30,8 @@ int main(int argc, char* argv[]) {
     int use_backup = 0;
     if(argc > 1 && strcmp(argv[1], "use-backup") == 0) { 
 	use_backup = 1;
-    } raft_configuration_t config;
+    }
+    raft_configuration_t config;
     FILE *f = fopen("./raft_config", "rb");
     fread(&config, sizeof(raft_configuration_t), 1, f);
     fclose(f);
