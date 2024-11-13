@@ -3,10 +3,11 @@
 #include "raft_utils.h"
 #include "raft_storage_manager.h"
 #include "raft_follower.h"
+#include "raft_leader.h"
 
 #include <pthread.h>
 
-int Raft_convert_to_candidate(raft_state_t *raft) {
+int Raft_attempt_to_elect(raft_state_t *raft) {
     // the lock must be held before calling that function!!!!!!
     raft->current_term ++;
     raft->voted_for = raft->id;
@@ -51,13 +52,20 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     }
 }
 
-void* election_thread(void* arg) {
+void* Raft_election_thread(void* arg) {
     raft_state_t *raft = (raft_state_t*)arg;
-    while(Raft_convert_to_candidate(raft) != 0);
+    while(Raft_attempt_to_elect(raft) != 0);
     pthread_exit(0);
 }
 
-void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft_vote_request_t *vote_r) {
+void Raft_convert_to_candidate(raft_state_t *raft) {
+    pthread_t tid;
+    pthread_create(&tid, NULL, Raft_election_thread, raft);
+    pthread_detach(tid);
+}
+
+
+void Raft_handle_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft_vote_request_t *vote_r) {
     spinlock_acquire(&raft->lock);
 
     //printf("	[%i -> %i] request vote\n", vote_r->candidate_id, raft->id);
@@ -92,5 +100,18 @@ void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft
     UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
 
     spinlock_release(&raft->lock);
+}
+
+int Raft_handle_vote_response(raft_state_t *raft, raft_response_packet_t *response) {
+    if(response->success <= 0) {
+	if(response->success == -1) raft->nblocked ++;
+    } else {
+	raft->nvoted ++;
+	if(raft->nvoted*2 > N_SERVERS) {
+	    Raft_convert_to_leader(raft);
+	    return 1;
+	}
+    }
+    return 0;
 }
 

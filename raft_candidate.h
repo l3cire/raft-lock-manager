@@ -3,10 +3,10 @@
 
 #include "raft.h"
 
-int Raft_convert_to_candidate(raft_state_t *raft);
+void Raft_convert_to_candidate(raft_state_t *raft);
 
-void* election_thread(void* arg);
+void Raft_handle_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft_vote_request_t *vote_r);
 
-void handle_raft_vote_request(raft_state_t *raft, struct sockaddr_in *addr, raft_vote_request_t *vote_r);
+int Raft_handle_vote_response(raft_state_t *raft, raft_response_packet_t *response); 
 
 #endif

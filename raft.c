@@ -1,7 +1,7 @@
 #include "raft.h"
+#include "raft_leader.h"
 #include "raft_utils.h"
 #include "raft_storage_manager.h"
-#include "raft_leader.h"
 #include "raft_candidate.h"
 #include "raft_follower.h"
 #include "pthread.h"
@@ -11,11 +11,10 @@
 #include <time.h>
 #include <errno.h>
 
-
-typedef struct raft_thread_arg {
+typedef struct raft_packet_thread_arg {
     raft_state_t* raft;
     raft_packet_t packet;
-    struct sockaddr_in addr; } raft_thread_arg_t;
+    struct sockaddr_in addr; } raft_packet_thread_arg_t;
 
 void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char filedir[256], raft_commit_handler commit_handler, int id, int port) {
     raft->id = id;
@@ -164,42 +163,14 @@ int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
 }
 
 
-void* handle_raft_packet(void* arg);
-void Raft_RPC_listen(raft_state_t *raft) {
-    pthread_t req_thread_id;
-    
-    //printf("(%i[%i]) starting server\n", raft->id, raft->current_term);
-    while(1) {
-	raft_thread_arg_t *arg = malloc(sizeof(raft_thread_arg_t));
-	bzero(arg, sizeof(raft_thread_arg_t));
-	arg->raft = raft;
-	int rc = UDP_Read(raft->rpc_sd, &arg->addr, (char*)&arg->packet, sizeof(raft_packet_t));
-	if(rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN) && raft->state == FOLLOWER) {
-	    //printf("(%i[%i]) follower timeout -- starting election\n", raft->id, raft->current_term);
-	    spinlock_acquire(&raft->lock);
-	    free(arg);
-	    pthread_create(&req_thread_id, NULL, election_thread, raft);
-	    pthread_detach(req_thread_id);
-	} else if(rc < 0) {
-	    free(arg);
-	} else {
-	    pthread_create(&req_thread_id, NULL, handle_raft_packet, arg);
-	    pthread_detach(req_thread_id);
-	}
-    }
-}
-
-
-void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) {
+void Raft_handle_response(raft_state_t *raft, raft_response_packet_t *response) {
     spinlock_acquire(&raft->lock);
-
     //printf("	[%i -> %i] responded %i (terms %i -> %i)\n", response->id, raft->id, response->success, response->term, raft->current_term);
     if(raft->current_term > response->term) {
 	spinlock_release(&raft->lock);
 	return;
     }
     if(raft->current_term < response->term) {
-	//printf("(%i) GOT BEHIND, SWITCHING TO FOLLOWER\n", raft->current_term);
 	Raft_convert_to_follower(raft, response->term);
 	Raft_save_state(raft);
 	spinlock_release(&raft->lock);
@@ -207,60 +178,34 @@ void handle_raft_response(raft_state_t *raft, raft_response_packet_t *response) 
     }
 
     if(raft->state == CANDIDATE) {
-	if(response->success <= 0) {
-	    if(response->success == -1) raft->nblocked ++;
-	    spinlock_release(&raft->lock);
-	    return;
-	}
-	raft->nvoted ++;
-	//printf("(%i[%i]) nvoted = %i\n", raft->id, raft->current_term, raft->nvoted);
-	if(raft->nvoted*2 > N_SERVERS) {
-	    Raft_convert_to_leader(raft);
-	    return;
-	}
+	if(Raft_handle_vote_response(raft, response)) return;	
     } else if(raft->state == LEADER && response->request_id == raft->last_request_id[response->id]) {
 	if(raft->next_index[response->id] < raft->start_log_index) {
-	    if(!response->success) {
-		printf("fatal error installing snapshot\n");
-		exit(1);
-	    }
-	} else if(!response->success) {
-	    raft->next_index[response->id] --;
-	} else if(raft->next_index[response->id] < raft->log_count) {
-	    if(raft->next_index[response->id] > raft->commit_index &&
-		Raft_get_log_term(raft, raft->next_index[response->id]) == raft->current_term &&
-		(++Raft_get_log(raft, raft->next_index[response->id])->n_servers_replicated)*2 > N_SERVERS) {
-		
-		Raft_commit_update(raft, raft->next_index[response->id]);
-		//Raft_print_state(raft);
-	    }
-	    raft->match_index[response->id] = raft->next_index[response->id];
-	    raft->next_index[response->id] ++;
+	    Raft_handle_install_response(raft, response);
+	} else {
+	    Raft_handle_append_response(raft, response);
 	}
-	raft->last_request_id[response->id] ++;
-	Raft_save_state(raft);
     }
-
     spinlock_release(&raft->lock);
 }
 
-void* handle_raft_packet(void* arg) {
-    raft_packet_t *packet = &((raft_thread_arg_t*)arg)->packet;
-    struct sockaddr_in *addr = &((raft_thread_arg_t*)arg)->addr;
-    raft_state_t *raft = ((raft_thread_arg_t*)arg)->raft;
+void* Raft_handle_packet(void* arg) {
+    raft_packet_t *packet = &((raft_packet_thread_arg_t*)arg)->packet;
+    struct sockaddr_in *addr = &((raft_packet_thread_arg_t*)arg)->addr;
+    raft_state_t *raft = ((raft_packet_thread_arg_t*)arg)->raft;
 
     switch (packet->request_type) {
-	case RESPONSE:
-	    handle_raft_response(raft, &packet->data.response); 
+	case RESPONSE: 
+	    Raft_handle_response(raft, &packet->data.response); 
 	    break;
 	case VOTE:
-	    handle_raft_vote_request(raft, addr, &packet->data.vote_r);
+	    Raft_handle_vote_request(raft, addr, &packet->data.vote_r);
 	    break;
 	case APPEND:
-	    handle_raft_append_request(raft, addr, &packet->data.append_r);
+	    Raft_handle_append_request(raft, addr, &packet->data.append_r);
 	    break;
 	case INSTALL_SNAPSHOT:
-	    handle_raft_install_snapshot_request(raft, addr, &packet->data.install_r);
+	    Raft_handle_install_snapshot_request(raft, addr, &packet->data.install_r);
 	    break;
     }
 
@@ -270,5 +215,28 @@ void* handle_raft_packet(void* arg) {
 
     free(arg);
     pthread_exit(0);
+}
+
+void Raft_RPC_listen(raft_state_t *raft) {
+    pthread_t req_thread_id;
+    
+    //printf("(%i[%i]) starting server\n", raft->id, raft->current_term);
+    while(1) {
+	raft_packet_thread_arg_t *arg = malloc(sizeof(raft_packet_thread_arg_t));
+	bzero(arg, sizeof(raft_packet_thread_arg_t));
+	arg->raft = raft;
+	int rc = UDP_Read(raft->rpc_sd, &arg->addr, (char*)&arg->packet, sizeof(raft_packet_t));
+	if(rc < 0 && (errno == ETIMEDOUT || errno == EAGAIN) && raft->state == FOLLOWER) {
+	    //printf("(%i[%i]) follower timeout -- starting election\n", raft->id, raft->current_term);
+	    spinlock_acquire(&raft->lock);
+	    free(arg);
+	    Raft_convert_to_candidate(raft);
+	} else if(rc < 0) {
+	    free(arg);
+	} else {
+	    pthread_create(&req_thread_id, NULL, Raft_handle_packet, arg);
+	    pthread_detach(req_thread_id);
+	}
+    }
 }
 

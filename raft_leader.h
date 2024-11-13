@@ -11,5 +11,8 @@ typedef struct raft_leader_thread_arg {
 
 void Raft_convert_to_leader(raft_state_t *raft);
 
+void Raft_handle_append_response(raft_state_t *raft, raft_response_packet_t *response);
+
+void Raft_handle_install_response(raft_state_t *raft, raft_response_packet_t *response);
 
 #endif

@@ -142,3 +142,29 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     }
 }
 
+void Raft_handle_append_response(raft_state_t *raft, raft_response_packet_t *response) {
+    if(!response->success) {
+	raft->next_index[response->id] --;
+    } else if(raft->next_index[response->id] < raft->log_count) {
+	if(raft->next_index[response->id] > raft->commit_index && Raft_get_log_term(raft, raft->next_index[response->id]) == raft->current_term &&
+	    (++Raft_get_log(raft, raft->next_index[response->id])->n_servers_replicated)*2 > N_SERVERS) {
+
+	    Raft_commit_update(raft, raft->next_index[response->id]);
+		//Raft_print_state(raft);
+	}
+	raft->match_index[response->id] = raft->next_index[response->id];
+	raft->next_index[response->id] ++;
+    }
+    raft->last_request_id[response->id] ++;
+    Raft_save_state(raft);
+}
+
+void Raft_handle_install_response(raft_state_t *raft, raft_response_packet_t *response) {
+    if(!response->success) {
+	printf("fatal error installing snapshot\n");
+	exit(1);
+    }
+    raft->last_request_id[response->id] ++;
+    Raft_save_state(raft);
+}
+
