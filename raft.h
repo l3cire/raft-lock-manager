@@ -151,4 +151,6 @@ int Raft_append_entry(raft_state_t *raft, raft_log_entry_t *log);
 
 int Raft_is_entry_committed(raft_state_t *raft, int term, int id);
 
+void Raft_commit_update(raft_state_t *raft, int new_commit_index);
+
 #endif
