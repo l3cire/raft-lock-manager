@@ -1,12 +1,12 @@
 #include "raft.h"
-#include "packet_format.h"
 #include "pthread.h"
 #include "spinlock.h"
 #include "udp.h"
 #include <stdlib.h>
 #include <time.h>
-#include <sys/stat.h>
 #include <errno.h>
+
+#include "raft_storage_manager.h"
 
 typedef struct raft_thread_arg {
     raft_state_t* raft;
@@ -39,7 +39,6 @@ void Raft_print_state(raft_state_t *raft) {
 }
 
 
-void raft_remove_snapshot(char path[256]);
 void Raft_term_update(raft_state_t *raft, int new_term) {
     raft->current_term = new_term;
     raft->nvoted = 0;
@@ -48,11 +47,7 @@ void Raft_term_update(raft_state_t *raft, int new_term) {
     raft->state = FOLLOWER;
 
     if(raft->install_snapshot_id != -1) {
-	char path[256];
-	sprintf(path, "%s", raft->files_dir);
-	sprintf(path + strlen(path), "snapshot_%i/", raft->install_snapshot_id);
-	raft_remove_snapshot(path);
-
+	Raft_remove_snapshot(raft, raft->install_snapshot_id);
 	raft->install_snapshot_id = -1;
 	raft->install_snapshot_index = -1;
     }
@@ -100,16 +95,6 @@ int Raft_is_entry_committed(raft_state_t *raft, int term, int id) {
     return 0;
 }
 
-void Raft_save_state(raft_state_t *raft) {
-    char raft_file[256];
-    strcpy(raft_file, raft->files_dir);
-    strcat(raft_file, "raft_state");
-    FILE *f = fopen(raft_file, "wb");
-    fwrite(raft, sizeof(raft_state_t), 1, f);
-    fflush(f);
-    fclose(f);
-}
-
 void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     for(int i = raft->commit_index + 1; i <= new_commit_index; ++i) {
 	if(Raft_get_log(raft, i)->type == LEADER_LOG) continue;
@@ -118,35 +103,6 @@ void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
     raft->commit_index = new_commit_index;
 }
 
-void raft_copy_files(char dir1[256], char dir2[256]) {
-    int dir1_len = strlen(dir1);
-    int dir2_len = strlen(dir2);
-    for(int file_ind = 0; file_ind < 100; ++file_ind) {
-	sprintf(dir1 + dir1_len, "file_%i", file_ind);
-    	FILE *f1 = fopen(dir1, "r");
-	if(f1 == NULL) continue;
-
-	sprintf(dir2 + dir2_len, "file_%i", file_ind);
-	FILE *f2 = fopen(dir2, "w");
-
-	int a;
-	while((a = fgetc(f1)) != EOF) {
-	    fputc(a, f2);
-	}
-	fclose(f1);
-	fclose(f2);
-    }
-}
-
-void raft_remove_snapshot(char path[256]){
-    for(int file_ind = 0; file_ind < 100; ++file_ind) {
-	char filename[256];
-	strcpy(filename, path);
-	sprintf(filename + strlen(filename), "file_%i", file_ind);
-	remove(filename);
-    }
-    rmdir(path);
-}
 
 int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
     spinlock_acquire(&raft->lock);
@@ -157,22 +113,11 @@ int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
     raft->snapshot_in_progress = 1; // set the flag that the snapshot is in progress
     spinlock_release(&raft->lock);
 
-    char dir[256];
-    sprintf(dir, "%s", raft->files_dir);
-    sprintf(dir + strlen(dir), "snapshot_%i/", new_log_start);
-    mode_t mod = 0777;
-    mkdir(dir, mod);
+    Raft_create_snapshot_dir(raft, new_log_start);
 
     int prev_snap_id = raft->start_log_index;
     if(raft->start_log_index != 0) {
-	char new_snap_dir[256];
-	strcpy(new_snap_dir, dir);
-
-	char prev_snap_dir[256];
-	sprintf(prev_snap_dir, "%s", raft->files_dir);
-	sprintf(prev_snap_dir + strlen(prev_snap_dir), "snapshot_%i/", raft->start_log_index);
-	
-	raft_copy_files(prev_snap_dir, new_snap_dir);
+	Raft_copy_snapshot(raft, raft->start_log_index, new_log_start);
     }
 
 
@@ -181,16 +126,7 @@ int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
 	if(log->type == LEADER_LOG) continue;
 	for(int j = 0; j < MAX_TRANSACTION_ENTRIES; ++j) {
 	    if(log->data[j].filename[0] == 0) break;
-
-	    char filename[256];
-	    sprintf(filename, "%s", raft->files_dir);
-	    sprintf(filename + strlen(filename), "snapshot_%i/", new_log_start);
-	    sprintf(filename + strlen(filename), "%s", log->data[j].filename);
-
-	    FILE *f = fopen(filename, "a+");
-	    fprintf(f, "%s", log->data[j].buffer);
-	    fflush(f);
-	    fclose(f);
+	    Raft_add_to_snapshot(raft, new_log_start, 0, log->data[j].filename, log->data[j].buffer);
 	}
     }
 
@@ -205,10 +141,7 @@ int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
     spinlock_release(&raft->lock);
 
     if(prev_snap_id != 0) {
-	char prev_snap_path[256];
-	strcpy(prev_snap_path, raft->files_dir);
-	sprintf(prev_snap_path + strlen(prev_snap_path), "snapshot_%i/", prev_snap_id);
-	raft_remove_snapshot(prev_snap_path);
+	Raft_remove_snapshot(raft, prev_snap_id);
     }
     
     return 0;
@@ -243,14 +176,7 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char file
 }
 
 void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_handler commit_handler, int id, int port) {
-    char raft_file[256];
-    strcpy(raft_file, filedir);
-    strcat(raft_file, "raft_state");
-    FILE *f = fopen(raft_file, "rb");
-    fread(raft, sizeof(raft_state_t), 1, f);
-    fclose(f);
-
-
+    Raft_load_state(raft, filedir); 
     assert(raft->id == id);
 
     raft->rpc_sd = UDP_Open(port);
@@ -273,14 +199,7 @@ void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_hand
     raft->install_snapshot_index = -1;
 
     if(raft->start_log_index != 0) {
-	char snapshot_dir[256];
-	sprintf(snapshot_dir, "%s", filedir);
-	sprintf(snapshot_dir + strlen(snapshot_dir), "snapshot_%i/", raft->start_log_index);
-
-	char main_dir[256];
-	sprintf(main_dir, "%s", filedir);
-
-	raft_copy_files(snapshot_dir, main_dir);
+	Raft_copy_snapshot(raft, raft->start_log_index, -1);
     }
     Raft_commit_update(raft, prev_session_commit_index);
 }
@@ -381,7 +300,6 @@ int Raft_convert_to_candidate(raft_state_t *raft) {
     }
 }
 
-
 void Raft_send_snapshot(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
     //wait for all snapshots to finish
     while(raft->snapshot_in_progress) {
@@ -401,39 +319,22 @@ void Raft_send_snapshot(raft_state_t *raft, int follower_id, struct sockaddr_in 
     packet.data.install_r.term = raft->current_term;
     packet.data.install_r.leader_id = raft->id;
 
-    for(int fileno = 0; fileno < 100; ++fileno) {
-	char fn[256];
-	strcpy(fn, raft->files_dir);
-	sprintf(fn + strlen(fn), "snapshot_%i/file_%i", id, fileno);
+    snapshot_iterator_t it;
+    snapshot_it_init(&it, raft, id);
 
-	FILE *f = fopen(fn, "rb");
-	if(f == NULL) continue;
-
-	sprintf(packet.data.install_r.filename, "file_%i", fileno);
-
-	while(1) {
-	    bzero(packet.data.install_r.buffer, BUFFER_SIZE);
-	    int nread = fread(packet.data.install_r.buffer, sizeof(char), BUFFER_SIZE, f);
-	    
-	    packet.data.install_r.index = ind;
-	    ind++;
-	    
-	    packet.data.install_r.request_id = raft->last_request_id[follower_id];
-	    packet.data.install_r.done = 0;
-
-	    while(packet.data.install_r.request_id == raft->last_request_id[follower_id]) {
-		UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
-		spinlock_release(&raft->lock);
-		usleep(HEARTBIT_TIME*1000);
-		spinlock_acquire(&raft->lock);
-	    }
-
-	    if(nread < BUFFER_SIZE) break;
+    while(snapshot_it_get_next(&it, packet.data.install_r.filename, packet.data.install_r.buffer)) {
+	packet.data.install_r.index = ind;
+	ind++;
+	packet.data.install_r.request_id = raft->last_request_id[follower_id];
+	packet.data.install_r.done = 0;
+	while(packet.data.install_r.request_id == raft->last_request_id[follower_id]) {
+	    UDP_Write(raft->rpc_sd, addr, (char*)&packet, sizeof(raft_packet_t));
+	    spinlock_release(&raft->lock);
+	    usleep(HEARTBIT_TIME*1000);
+	    spinlock_acquire(&raft->lock);
 	}
-
-	fclose(f);
     }
-    
+   
     packet.data.install_r.done = 1;
     packet.data.install_r.request_id = raft->last_request_id[follower_id];
     packet.data.install_r.index = ind;
@@ -715,36 +616,16 @@ void handle_raft_install_snapshot_request(raft_state_t *raft, struct sockaddr_in
 	raft->install_snapshot_index = -1;
 	raft->install_snapshot_id = -1;
 	
-	char snapshot_dir[256];
-	sprintf(snapshot_dir, "%s", raft->files_dir);
-	sprintf(snapshot_dir + strlen(snapshot_dir), "snapshot_%i/", raft->start_log_index);
-
-	char main_dir[256];
-	sprintf(main_dir, "%s", raft->files_dir);
-
-	raft_copy_files(snapshot_dir, main_dir);
+	Raft_copy_snapshot(raft, raft->start_log_index, -1);
 	Raft_save_state(raft);
 
 	packet.data.response.success = 1;
     } else {
+	Raft_add_to_snapshot(raft, install_r->snapshot_id, (raft->install_snapshot_id == -1), install_r->filename, install_r->buffer);	
 	raft->snapshot_in_progress = 1;
-
-	char dir[256];
-	strcpy(dir, raft->files_dir);
-	sprintf(dir + strlen(dir), "snapshot_%i/", install_r->snapshot_id);
-	if(raft->install_snapshot_id == -1) {
-	    raft->install_snapshot_id = install_r->snapshot_id;
-	    mode_t mod = 0777;
-	    mkdir(dir, mod);
-	}
-	
-	sprintf(dir + strlen(dir), "%s", install_r->filename);
-	FILE *f = fopen(dir, "a+");
-	fprintf(f, "%s", install_r->buffer);
-	fflush(f);
-	fclose(f);
-
+	raft->install_snapshot_id = install_r->snapshot_id;
 	raft->install_snapshot_index++;
+
 	Raft_save_state(raft);
 
 	packet.data.response.success = 1;
@@ -755,10 +636,7 @@ void handle_raft_install_snapshot_request(raft_state_t *raft, struct sockaddr_in
     spinlock_release(&raft->lock);
 
     if(outdated_snapshot != 0) {
-	char prev_snap_path[256];
-	strcpy(prev_snap_path, raft->files_dir);
-	sprintf(prev_snap_path + strlen(prev_snap_path), "snapshot_%i/", outdated_snapshot);
-	raft_remove_snapshot(prev_snap_path);
+	Raft_remove_snapshot(raft, outdated_snapshot);
     }
 }
 
