@@ -7,13 +7,14 @@
 
 void Raft_send_snapshot(raft_state_t *raft, int follower_id, struct sockaddr_in *addr) {
     //wait for all snapshots to finish
+    printf("TRYING TO SEND A SNAPSHOT TO %i\n", follower_id);
     while(raft->snapshot_in_progress) {
 	spinlock_release(&raft->lock);
 	sched_yield();
 	spinlock_acquire(&raft->lock);
     }
 
-    raft->snapshot_in_progress = 1; // set snapshot flag so that no snapshots are created
+    raft->n_followers_receiving_snapshots ++; // set snapshot flag so that no snapshots are created
 
     int id = raft->start_log_index;
     int ind = 0;
@@ -38,6 +39,11 @@ void Raft_send_snapshot(raft_state_t *raft, int follower_id, struct sockaddr_in 
 	    usleep(HEARTBIT_TIME*1000);
 	    spinlock_acquire(&raft->lock);
 	}
+	if(!raft->last_request_response[follower_id]) {
+	    printf("ABORTING SENDING A SNAPSHOT\n");
+	    raft->n_followers_receiving_snapshots --;
+	    return;
+	}
     }
    
     packet.data.install_r.done = 1;
@@ -50,10 +56,15 @@ void Raft_send_snapshot(raft_state_t *raft, int follower_id, struct sockaddr_in 
 	usleep(HEARTBIT_TIME*1000);
 	spinlock_acquire(&raft->lock);
     }
+    if(!raft->last_request_response[follower_id]) {
+	printf("ABORTING SENDING A SNAPSHOT\n");
+	raft->n_followers_receiving_snapshots --;
+	return;
+    }
 
     raft->next_index[follower_id] = raft->start_log_index;
     raft->match_index[follower_id] = raft->start_log_index - 1;
-    raft->snapshot_in_progress = 0;
+    raft->n_followers_receiving_snapshots --;
 
     printf("SUCCESSFULLY INSTALLED A SNAPSHOT\n");
 }
@@ -69,11 +80,7 @@ void Raft_send_append_entry_request(raft_state_t *raft, int follower_id, struct 
     packet.data.append_r.prev_log_index = next_ind - 1;
     packet.data.append_r.prev_log_term = Raft_get_log_term(raft, next_ind - 1); 
     packet.data.append_r.request_id = raft->last_request_id[follower_id];
-    if(next_ind < raft->start_log_index) {
-	printf("TRYING TO GET A SNAPSHOTTED LOG ENTRY: %i for server %i\n", next_ind, follower_id);
-	Raft_send_snapshot(raft, follower_id, addr);
-	return;
-    }
+    
     if(next_ind == raft->log_count) {
 	packet.data.append_r.entries_n = 0;
 	//printf("(%i) sending heartbeat to %i\n", raft->id, follower_id);
@@ -98,7 +105,11 @@ void* Raft_leader_thread(void* arg) {
 	    spinlock_release(&raft->lock);
 	    break;
 	}
-	Raft_send_append_entry_request(raft, follower_id, addr);
+	if(raft->next_index[follower_id] < raft->start_log_index) {
+	    Raft_send_snapshot(raft, follower_id, addr);
+	} else {
+	    Raft_send_append_entry_request(raft, follower_id, addr);
+	}
 	spinlock_release(&raft->lock);
 	usleep(HEARTBIT_TIME*1000);
     }
@@ -110,7 +121,7 @@ void* Raft_leader_thread(void* arg) {
 void Raft_convert_to_leader(raft_state_t *raft) {
     // the lock must be acquired here!!!!!!
     raft->state = LEADER;
-    raft->voted_for = -1;
+    raft->n_followers_receiving_snapshots = 0;
 
     // adding an artificial log entry in order to commit all previous ones
     raft->log_count ++;
@@ -124,6 +135,7 @@ void Raft_convert_to_leader(raft_state_t *raft) {
 	raft->next_index[i] = raft->log_count;
 	raft->match_index[i] = 0;
 	raft->last_request_id[i] = 0;
+	raft->last_request_response[i] = -1;
     }
     
     Raft_print_state(raft);
@@ -161,8 +173,7 @@ void Raft_handle_append_response(raft_state_t *raft, raft_response_packet_t *res
 
 void Raft_handle_install_response(raft_state_t *raft, raft_response_packet_t *response) {
     if(!response->success) {
-	printf("fatal error installing snapshot\n");
-	exit(1);
+	printf("error installing snapshot (follower probably relaunched)\n");
     }
     raft->last_request_id[response->id] ++;
     Raft_save_state(raft);

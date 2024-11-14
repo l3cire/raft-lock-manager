@@ -31,6 +31,7 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char file
     raft->start_log_index = 0;
     raft->current_term = 0;
     raft->snapshot_in_progress = 0;
+    raft->n_followers_receiving_snapshots = 0;
     
     raft->commit_index = -1;
     raft->log_count = 0;
@@ -54,6 +55,7 @@ void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_hand
     raft->commit_handler = commit_handler;
     raft->state = FOLLOWER;
     raft->snapshot_in_progress = 0;
+    raft->n_followers_receiving_snapshots = 0;
 
     spinlock_init(&raft->lock);
     
@@ -121,7 +123,7 @@ void Raft_commit_update(raft_state_t *raft, int new_commit_index) {
 
 int Raft_create_snapshot(raft_state_t *raft, int new_log_start) {
     spinlock_acquire(&raft->lock);
-    if(raft->snapshot_in_progress || new_log_start <= raft->start_log_index || new_log_start > raft->commit_index + 1) {
+    if(raft->snapshot_in_progress || raft->n_followers_receiving_snapshots > 0 || new_log_start <= raft->start_log_index || new_log_start > raft->commit_index + 1) {
 	spinlock_release(&raft->lock);
 	return -1;
     }
@@ -176,6 +178,8 @@ void Raft_handle_response(raft_state_t *raft, raft_response_packet_t *response) 
 	spinlock_release(&raft->lock);
 	return;
     }
+
+    raft->last_request_response[response->id] = response->success;
 
     if(raft->state == CANDIDATE) {
 	if(Raft_handle_vote_response(raft, response)) return;	

@@ -90,6 +90,7 @@ void Raft_handle_install_snapshot_request(raft_state_t *raft, struct sockaddr_in
     if(raft->current_term > install_r->term || 
 	(raft->install_snapshot_id != -1 && raft->install_snapshot_id != install_r->snapshot_id) || 
 	raft->install_snapshot_index + 1 != install_r->index) {
+	    printf("PROBLEM WITH INSTALL REQUEST: terms [%i -> %i], snap ids [%i -> %i], snap_inds [%i -> %i]\n", raft->current_term, install_r->term, raft->install_snapshot_id, install_r->snapshot_id, raft->install_snapshot_index, install_r->index);
 	    packet.data.response.success = 0;
     } else if(install_r->done) {
 	raft->snapshot_in_progress = 0;

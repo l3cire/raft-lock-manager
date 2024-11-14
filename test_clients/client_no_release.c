@@ -21,13 +21,14 @@ int main(int argc, char* argv[]) {
 
     RPC_acquire_lock(&rpc); // acquire the lock
 
-    for(int i = 0; i < 10; ++i) { // write msg to file_0 100 times
-
-	char filename[7];
-	sprintf(filename, "file_%i", i);
-	for(int j = 0; j < strlen(msg); ++j) { // write a message character by character
-	    buffer[0] = msg[j];
-	    RPC_append_file(&rpc, filename, buffer);
+    for(int k = 0; k < 20; ++k) {
+	for(int i = 0; i < 10; ++i) { // write msg to file_0 100 times
+	    char filename[7];
+	    sprintf(filename, "file_%i", i);
+	    for(int j = 0; j < strlen(msg); ++j) { // write a message character by character
+		buffer[0] = msg[j];
+		RPC_append_file(&rpc, filename, buffer);
+	    }
 	}
     }
 

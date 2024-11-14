@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     char* buffer = malloc(BUFFER_SIZE);
 
 
-    for(int k = 0; k < 5; ++k) { // write msg to file_0 100 times
+    for(int k = 0; k < 20; ++k) { // write msg to file_0 100 times
 	RPC_acquire_lock(&rpc); // acquire the lock
 	for(int i = 0; i < 10; ++i) {
 
@@ -34,12 +34,7 @@ int main(int argc, char* argv[]) {
 	RPC_release_lock(&rpc);
     }
 
-
-    RPC_release_lock(&rpc);
-
     RPC_close(&rpc);
-    printf("finished mult sessions\n");
-
     return 0;
 }
 

@@ -82,6 +82,8 @@ typedef struct raft_state {
 	int next_index[MAX_SERVER_ID+1];
 	int match_index[MAX_SERVER_ID+1];
 	int last_request_id[MAX_SERVER_ID+1];
+	int last_request_response[MAX_SERVER_ID+1];
+	int n_followers_receiving_snapshots;
 } raft_state_t;
 
 typedef struct raft_append_request {
