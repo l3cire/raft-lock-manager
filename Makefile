@@ -8,7 +8,7 @@ SRCS_COMMON			:= udp.c
 SRCS_CLIENT			:= client_rpc.c
 SRCS_LOCK_SERVER		:= spinlock.c server_rpc.c timer.c tmdspinlock.c raft.c raft_leader.c raft_follower.c raft_candidate.c raft_utils.c raft_storage_manager.c
 
-SRCS_TESTS			:= test_long_requests.c test_clients.c test1_packet_delay.c test2_packet_drop.c test3_stucks_before_editing.c test4_stucks_after_editing.c test5_server_crash_lock_free.c test6_server_crash_lock_held.c
+SRCS_TESTS			:= test_long_requests.c test_clients.c test1_packet_delay.c test2_packet_drop.c test3_stucks_before_editing.c test4_stucks_after_editing.c test5_server_crash_lock_free.c test6_server_crash_lock_held.c test7_follower_crash_fast_recovery.c test8_follower_crash_long_recovery.c test9_leader_crash_slow_recovery.c
 SRCS_TEST_CLIENTS		:= client_long_requests.c client_mult_sessions.c client_no_release.c client_normal.c 
 
 BUILD_DIR			:= ./build

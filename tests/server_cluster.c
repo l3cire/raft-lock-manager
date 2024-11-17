@@ -5,6 +5,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <signal.h>
+#include "../client_rpc.h"
 
 #define N_SERVERS 5
 
@@ -72,3 +73,32 @@ void kill_all_servers() {
 	kill(server_pid[i], SIGKILL);
     }
 }
+
+void restart_server(rpc_conn_t *rpc, int leader, int delay) {
+    int ind;
+    if(leader) {
+	ind = rpc->current_leader_index;
+    } else {
+	ind = rand() % N_SERVERS;
+	while(ind == rpc->current_leader_index || server_active[ind] == 0) ind = rand() % N_SERVERS;
+    }
+    server_active[ind] = 0;
+    nactive --;
+    kill(server_pid[ind], SIGKILL);
+    printf("killed server %i\n", ind+1);
+
+    sleep(delay);
+
+    server_active[ind] = 1;
+    nactive++;
+
+    server_pid[ind] = fork();
+    if(server_pid[ind] != 0) return;
+
+    char id_arg[2]; sprintf(id_arg, "%i", ind+1);
+    char* args[] = {"./raft_config", id_arg, "use-backup", NULL};
+    int rs = execv("./bin/server", args);
+    printf("exec failed, result: %i\n", rs);
+    exit(1);
+}
+
