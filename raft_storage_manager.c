@@ -13,13 +13,18 @@ void Raft_load_state(raft_state_t *raft, char filedir[256]) {
 }
 
 void Raft_save_state(raft_state_t *raft) {
-    char raft_file[256];
-    strcpy(raft_file, raft->files_dir);
-    strcat(raft_file, "raft_state");
-    FILE *f = fopen(raft_file, "wb");
+    char tmp_raft_file[256];
+    strcpy(tmp_raft_file, raft->files_dir);
+    strcat(tmp_raft_file, "tmp_raft_state");
+    FILE *f = fopen(tmp_raft_file, "wb");
     fwrite(raft, sizeof(raft_state_t), 1, f);
     fflush(f);
     fclose(f);
+
+    char raft_file[256];
+    strcpy(raft_file, raft->files_dir);
+    strcat(raft_file, "raft_state");
+    rename(tmp_raft_file, raft_file);
 }
 
 int Raft_get_snapshot_path(raft_state_t *raft, int id, char path[256]) {
