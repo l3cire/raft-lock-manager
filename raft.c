@@ -44,6 +44,7 @@ void Raft_server_init(raft_state_t *raft, raft_configuration_t config, char file
     raft->install_snapshot_index = -1;
 
     for(int i = 0; i < 100; ++i) Raft_remove_snapshot(raft, i);
+    Raft_clean_main_files(raft);
 
 }
 
@@ -71,6 +72,7 @@ void Raft_server_restore(raft_state_t *raft, char filedir[256], raft_commit_hand
     raft->install_snapshot_id = -1;
     raft->install_snapshot_index = -1;
 
+    Raft_clean_main_files(raft);
     if(raft->start_log_index != 0) {
 	Raft_copy_snapshot(raft, raft->start_log_index, -1);
     }

@@ -64,3 +64,11 @@ void start_server_failures() {
 	printf("killed server %i\n", ind+1);
     }
 }
+
+void kill_all_servers() {
+    for(int i = 0; i < N_SERVERS; ++i) {
+	if(server_active[i] == 0) continue;
+	server_active[i] = 0;
+	kill(server_pid[i], SIGKILL);
+    }
+}

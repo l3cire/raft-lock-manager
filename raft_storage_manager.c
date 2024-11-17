@@ -50,6 +50,16 @@ void Raft_remove_snapshot(raft_state_t *raft, int snapshot_id) {
     rmdir(path);
 }
 
+void Raft_clean_main_files(raft_state_t *raft) {
+    char path[256];
+    strcpy(path, raft->files_dir);
+    for(int file_ind = 0; file_ind < 100; ++file_ind) {
+	sprintf(path + strlen(raft->files_dir), "file_%i", file_ind);
+	FILE *f = fopen(path, "w");
+	fclose(f);
+    }
+}
+
 void Raft_copy_snapshot(raft_state_t *raft, int source_snapshot_id, int dest_snapshot_id) {
     char dir1[256], dir2[256];
     int dir1_len = Raft_get_snapshot_path(raft, source_snapshot_id, dir1);
