@@ -1,5 +1,8 @@
 #include "udp.h"
 
+int packet_loss = 0;
+int fail_prob = 0;
+
 // create a socket and bind it to a port on the current machine
 // used to listen for incoming packets
 int UDP_Open(int port) {
@@ -60,6 +63,10 @@ int UDP_SetReceiveTimeout(int fd, int timeout) {
 }
 
 int UDP_Write(int fd, struct sockaddr_in *addr, char *buffer, int n) {
+    if(packet_loss && ((rand() % 100) < fail_prob)) {
+	printf("PACKET LOSS\n");
+	return n;
+    }
     int addr_len = sizeof(struct sockaddr_in);
     int rc = sendto(fd, buffer, n, 0, (struct sockaddr *) addr, addr_len);
     return rc;
@@ -74,4 +81,9 @@ int UDP_Read(int fd, struct sockaddr_in *addr, char *buffer, int n) {
 
 int UDP_Close(int fd) {
     return close(fd);
+}
+
+void UDP_SimulatePacketLoss(int fp) {
+    packet_loss = 1;
+    fail_prob = fp;
 }

@@ -36,4 +36,6 @@ int UDP_Write(int fd, struct sockaddr_in *addr, char *buffer, int n);
 int UDP_FillSockAddr(struct sockaddr_in *addr, char *hostName, int port);
 int UDP_SetReceiveTimeout(int fd, int timeout);
 
+void UDP_SimulatePacketLoss(int fp);
+
 #endif // __UDP_h__

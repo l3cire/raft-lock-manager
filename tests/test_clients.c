@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <signal.h>
+
+#include "./server_cluster.c"
 
 #define N_CLIENTS 10
-#define N_SERVERS 5
 
 char* clients[N_CLIENTS] = {
     "./bin/client_long_requests",
@@ -56,58 +56,10 @@ int main(int argc, char* argv[]) {
     }
     printf("use_backup = %s\n", (use_backup) ? "true" : "false");
 
-   // fork server process
-    int server_pid[N_SERVERS];
-    int server_active[N_SERVERS];
-    for(int i = 0; i < N_SERVERS; ++i) {
-	server_active[i] = 1;
-	server_pid[i] = fork();
-	if(server_pid[i] != 0) continue; 
-
-	char id_arg[2]; sprintf(id_arg, "%i", i+1);
-	char* args[] = {"./raft_config", id_arg, use_backup ? "use-backup" : NULL, NULL};
-	int rs = execv("./bin/server", args);
-	printf("exec failed, result: %i\n", rs);
-	exit(1);
-    }
-
-    // wait one second to make sure the server has started receiving requests
-    sleep(1);
+    start_server_cluster(use_backup); 
 
     pthread_t tid;
     pthread_create(&tid, NULL, clients_thread, 0);
 
-    int nactive = 5;
-    while(1) {
-	if(nactive < 5 && ((rand() % 100) < 10)) {
-	    int ind = rand() % N_SERVERS;
-	    while(server_active[ind] == 1) ind = rand() % N_SERVERS;
-
-	    server_active[ind] = 1;
-	    nactive++;
-
-	    server_pid[ind] = fork();
-	    if(server_pid[ind] != 0) continue;
-
-	    char id_arg[2]; sprintf(id_arg, "%i", ind+1);
-	    char* args[] = {"./raft_config", id_arg, "use-backup", NULL};
-	    int rs = execv("./bin/server", args);
-	    printf("exec failed, result: %i\n", rs);
-	    exit(1);
-	}
-
-	if(nactive == 3 || ((rand() % 100) < 95)) {	
-	    usleep(100000);
-	    continue;
-	}
-
-	int ind = rand() % N_SERVERS;
-	while(server_active[ind] == 0) ind = rand() % N_SERVERS;
-
-	server_active[ind] = 0;
-	nactive --;
-	kill(server_pid[ind], SIGKILL);
-	printf("killed server %i\n", ind+1);
-    }
-
+    start_server_failures(); 
 }

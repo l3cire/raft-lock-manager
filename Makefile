@@ -8,7 +8,7 @@ SRCS_COMMON			:= udp.c
 SRCS_CLIENT			:= client_rpc.c
 SRCS_LOCK_SERVER		:= spinlock.c server_rpc.c timer.c tmdspinlock.c raft.c raft_leader.c raft_follower.c raft_candidate.c raft_utils.c raft_storage_manager.c
 
-SRCS_TESTS			:= test_lock.c test_long_requests.c test_timer.c test_tmdspinlock.c test_raft_election.c test_clients.c
+SRCS_TESTS			:= test_long_requests.c test_clients.c test1_packet_delay.c test2_packet_drop.c
 SRCS_TEST_CLIENTS		:= client_long_requests.c client_mult_sessions.c client_no_release.c client_normal.c 
 
 BUILD_DIR			:= ./build
@@ -37,7 +37,7 @@ all: $(client_tartgets) server
 server: $(OBJ_COMMON) $(OBJ_LOCK_SERVER) $(BUILD_DIR)/server.o
 	$(CC) $(CFLAGS) $^ -o $(BIN_DIR)/$@
 
-test_%: $(BUILD_DIR)/test_%.o server $(CLIENT_TARGETS) clean_files 
+test%: $(BUILD_DIR)/test%.o server $(CLIENT_TARGETS) clean_files 
 	$(CC) $(CFLAGS) $< $(OBJ_COMMON) $(OBJ_CLIENT) $(OBJ_LOCK_SERVER) -o $(BIN_DIR)/$@
 
 client_%: $(BUILD_DIR)/client_%.o $(OBJ_COMMON) $(OBJ_CLIENT) 
