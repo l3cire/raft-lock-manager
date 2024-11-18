@@ -34,7 +34,7 @@ void start_server_cluster(int use_backup) {
 
 void start_server_failures() {
     while(1) {
-	if(nactive < 5 && ((rand() % 100) < 10)) {
+	if(nactive < 5 && ((rand() % 100) < 20)) {
 	    int ind = rand() % N_SERVERS;
 	    while(server_active[ind] == 1) ind = rand() % N_SERVERS;
 

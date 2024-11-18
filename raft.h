@@ -6,14 +6,18 @@
 #include "packet_format.h"
 
 #define __RAFT_h__
-#define LOG_SIZE 100
+
 #define N_SERVERS 5 
 #define MAX_SERVER_ID 10
+
+#define LOG_SIZE 100
 #define MAX_TRANSACTION_ENTRIES 10
-#define COMMITS_TO_SNAPSHOT 10
+
+#define COMMITS_TO_SNAPSHOT 60
+#define SNAPSHOT_SIZE 50
 
 #define ELECTION_TIMEOUT 1000
-#define HEARTBIT_TIME 300
+#define HEARTBIT_TIME 100
 
 typedef struct raft_server_configuration {
 	struct sockaddr_in client_socket;

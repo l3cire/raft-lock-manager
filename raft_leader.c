@@ -120,7 +120,6 @@ void* Raft_leader_thread(void* arg) {
 
 void Raft_convert_to_leader(raft_state_t *raft) {
     // the lock must be acquired here!!!!!!
-    raft->state = LEADER;
     raft->n_followers_receiving_snapshots = 0;
 
     // adding an artificial log entry in order to commit all previous ones
@@ -142,6 +141,8 @@ void Raft_convert_to_leader(raft_state_t *raft) {
     printf("(%i[%i]) elected as leader\n", raft->id, raft->current_term);
 
     Raft_save_state(raft);
+
+    raft->state = LEADER;
 
     spinlock_release(&raft->lock);
 

@@ -223,7 +223,7 @@ void* Raft_handle_packet(void* arg) {
     }
 
     if(raft->commit_index - raft->start_log_index + 1 >= COMMITS_TO_SNAPSHOT) {
-	Raft_create_snapshot(raft, raft->commit_index - 2);
+	Raft_create_snapshot(raft, raft->start_log_index + SNAPSHOT_SIZE);
     }
 
     free(arg);
