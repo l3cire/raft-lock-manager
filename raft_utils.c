@@ -2,7 +2,7 @@
 #include "raft_utils.h"
 
 void Raft_print_state(raft_state_t *raft) {
-    char state_str[256];
+    char state_str[1024];
     sprintf(state_str, "%i(%i)	%i[", raft->id, raft->current_term, raft->start_log_index);
     for(int i = 0; i < raft->log_count - raft->start_log_index; ++i) {
 	if(raft->log[i].type == LEADER_LOG) {
