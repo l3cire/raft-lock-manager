@@ -3,12 +3,12 @@
 
 int main(int argc, char* argv[]) {
     raft_configuration_t config;
-    FILE *f = fopen(argv[0], "rb");
+    FILE *f = fopen(argv[1], "rb");
     fread(&config, sizeof(raft_configuration_t), 1, f);
     fclose(f);
     
-    int id = atoi(argv[1]);
-    int port = atoi(argv[2]);
+    int id = atoi(argv[2]);
+    int port = atoi(argv[3]);
 
     rpc_conn_t rpc;
     RPC_init(&rpc, id, port, config);

@@ -22,7 +22,7 @@ void start_server_cluster(int use_backup) {
 	if(server_pid[i] != 0) continue; 
 
 	char id_arg[2]; sprintf(id_arg, "%i", i+1);
-	char* args[] = {"./raft_config", id_arg, use_backup ? "use-backup" : NULL, NULL};
+	char* args[] = {"./bin/server/", "./raft_config", id_arg, use_backup ? "use-backup" : NULL, NULL};
 	int rs = execv("./bin/server", args);
 	printf("exec failed, result: %i\n", rs);
 	exit(1);
@@ -45,7 +45,7 @@ void start_server_failures() {
 	    if(server_pid[ind] != 0) continue;
 
 	    char id_arg[2]; sprintf(id_arg, "%i", ind+1);
-	    char* args[] = {"./raft_config", id_arg, "use-backup", NULL};
+	    char* args[] = {"./bin/server/", "./raft_config", id_arg, "use-backup", NULL};
 	    int rs = execv("./bin/server", args);
 	    printf("exec failed, result: %i\n", rs);
 	    exit(1);
@@ -96,7 +96,7 @@ void restart_server(rpc_conn_t *rpc, int leader, int delay) {
     if(server_pid[ind] != 0) return;
 
     char id_arg[2]; sprintf(id_arg, "%i", ind+1);
-    char* args[] = {"./raft_config", id_arg, "use-backup", NULL};
+    char* args[] = {"./bin/server", "./raft_config", id_arg, "use-backup", NULL};
     int rs = execv("./bin/server", args);
     printf("exec failed, result: %i\n", rs);
     exit(1);

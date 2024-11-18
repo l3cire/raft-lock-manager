@@ -35,7 +35,7 @@ void* clients_thread(void* arg) {
 
 	char id_arg[2]; sprintf(id_arg, "%i", i);
 	char port_arg[5]; sprintf(port_arg, "%i", 2000+i);
-	char* args[] = {"./raft_config", id_arg, port_arg, NULL};
+	char* args[] = {clients[i], "./raft_config", id_arg, port_arg, NULL};
 	int rs = execv(clients[i], args);
 	printf("client exec failed, result: %i\n", rs);
     }

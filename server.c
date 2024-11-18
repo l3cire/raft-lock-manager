@@ -122,14 +122,15 @@ void* raft_listener_thread(void* arg) {
 
 int main(int argc, char *argv[]) {
     // initialize rpc handler
+    
     raft_configuration_t config;
-    FILE *f = fopen(argv[0], "rb");
+    FILE *f = fopen(argv[1], "rb");
     fread(&config, sizeof(raft_configuration_t), 1, f);
     fclose(f);
 
-    int id = atoi(argv[1]);
+    int id = atoi(argv[2]);
     int use_backup = 0;
-    if(argc >= 3 && strcmp(argv[2], "use-backup") == 0) {
+    if(argc >= 4 && strcmp(argv[3], "use-backup") == 0) {
 	use_backup = 1;
     }
     int port_client;
